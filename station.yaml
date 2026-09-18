@@ -1,0 +1,27 @@
+# Station's own config: two starter virtual MCPs, proving mcp-host is
+# feature-complete enough to build a real prototype on. Swap these two
+# plugins out for Station's actual first capabilities whenever they're
+# decided — everything about wiring a new one up is in
+# libs/mcp-host/README.md ("Adding a new logical server").
+logical_servers:
+  - id: echo
+    name: Echo Server
+    description: Process-mode virtual MCP — a real, standalone MCP server.
+    transport: process
+    process:
+      command: ./bin/echo-server
+      args: []
+    serve:
+      stdio: true
+
+  - id: clock
+    name: Clock Plugin
+    description: Inprocess-mode virtual MCP — a lightweight plugin-sdk subprocess.
+    transport: inprocess
+    inprocess:
+      command: ./bin/clock-plugin
+    serve:
+      http:
+        path: /clock
+        allowed_origins: []
+        bearer_tokens: []
