@@ -58,11 +58,20 @@ flake.
 ## Boundaries
 
 `go.mod` requires the real, published `github.com/hollis-labs/mcp-host`
-(`v0.1.0`) — no `replace` directive. This repo is also listed in
+(`v0.2.0`) — no `replace` directive. This repo is also listed in
 `~/dev/hollis-labs/go.work` alongside `libs/mcp-host` for convenience when
 developing both together; that's a local override only, not something
 `go.mod` itself depends on. Bumping the `mcp-host` version here should
 follow a real tag on that repo, not a local, untagged change.
+
+MCP is the only agent-facing interface — verified against Tangent's own
+source and docs, which state this explicitly for itself. `cmd/station`'s
+`validate`/`list`/`version` subcommands are an ops/inspection surface, not
+a second agent API; don't add MCP tools (or an HTTP management API) for
+operating Station itself (listing/adding/restarting logical servers). If
+that need ever becomes real, look at how Tangent's `tangent plugin
+{install,remove,list,dir}` stays CLI-only before reaching for an MCP tool
+instead.
 
 Station should not reimplement anything `libs/mcp-host` already owns —
 config parsing, the transport interface, supervision, serving. If a change

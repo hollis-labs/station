@@ -49,6 +49,14 @@ logical_servers:
     transport: inprocess
     inprocess:
       command: %q
+      tools:
+        - name: now
+          description: Returns the current time.
+          input_schema:
+            type: object
+            properties: {}
+          annotations:
+            readOnlyHint: true
     serve:
       http:
         path: /clock

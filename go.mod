@@ -4,7 +4,7 @@ go 1.26.8
 
 require (
 	github.com/hollis-labs/go-mcp v0.7.0
-	github.com/hollis-labs/mcp-host v0.1.0
+	github.com/hollis-labs/mcp-host v0.2.0
 	github.com/hollis-labs/plugin-sdk v0.5.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 )

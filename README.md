@@ -14,7 +14,7 @@ library is feature-complete enough to build a real product on top of.
 
 ## Status
 
-Built on `mcp-host v0.1.0`. Two working virtual MCPs (`echo`, process-mode;
+Built on `mcp-host v0.2.0`. Two working virtual MCPs (`echo`, process-mode;
 `clock`, inprocess-mode) run simultaneously, each independently reachable,
 each recovering from a real process kill — see `cmd/station/smoke_test.go`.
 
@@ -24,18 +24,45 @@ each recovering from a real process kill — see `cmd/station/smoke_test.go`.
 go build -o bin/echo-server ./plugins/echo-server
 go build -o bin/clock-plugin ./plugins/clock-plugin
 go build -o station ./cmd/station
-./station -config station.yaml -http-addr :8080
+
+./station validate                    # check station.yaml without running anything
+./station list                        # see what's configured
+./station serve -http-addr :8080      # or just `./station` — serve is the default
 ```
 
 This serves `echo` over stdio and `clock` over HTTP at `/clock`
 simultaneously. Point an MCP client at station's stdio for `echo`'s tools,
 or at `http://localhost:8080/clock` for `clock`'s.
 
+## Service layer
+
+**MCP is the only agent-facing interface** — matching Tangent's own
+convention (verified against its source and docs; see `AGENTS.md`). The
+CLI is an operator/ops surface, not a second agent API:
+
+- `station` / `station serve` — the daemon; bare invocation defaults to
+  this, matching Tangent's "no serve subcommand, bare invocation just
+  serves" pattern.
+- `station validate [-config PATH]` — parse and validate a config file,
+  no side effects. Exit 0/1.
+- `station list [-config PATH]` — print every configured logical server:
+  id, name, transport, and (for `inprocess`) its manifest-declared tool
+  names, without spawning or dialing anything.
+- `station version` — print the build version.
+
+There's no management API and no MCP tools for operating Station
+itself (adding a logical server, restarting one, etc.) — that's
+config-file-driven and CLI-inspected, on purpose, the same way Tangent's
+own plugin install/list/remove stays CLI-only rather than becoming
+agent-callable tools. An agent builds with Station by editing
+`station.yaml` and running `validate`/`list` to check its work, the same
+way an operator would.
+
 ## Depending on mcp-host
 
 Station depends on the real, published
 [`github.com/hollis-labs/mcp-host`](https://github.com/hollis-labs/mcp-host)
-(`v0.1.0` as of this writing) — no `replace` directive needed. Both repos
+(`v0.2.0` as of this writing) — no `replace` directive needed. Both repos
 are also listed in `~/dev/hollis-labs/go.work` for convenience when
 developing them together locally; that workspace entry overrides
 resolution to the local checkout, but `go.mod`'s own `require` line is a
@@ -52,9 +79,10 @@ nothing Station-specific about the format itself.
 
 ## Package map
 
-- `cmd/station/main.go` — the whole binary: flag parsing, config loading,
-  then a single call into `mcphost.Run`. Everything else lives in the
-  library.
+- `cmd/station/main.go` — the whole binary: subcommand dispatch
+  (`serve`/`validate`/`list`/`version`), flag parsing, config loading, then
+  a single call into `mcphost.Run` for `serve`. Everything host-shaped
+  lives in the library.
 - `plugins/echo-server` — process-mode starter virtual MCP: a real,
   standalone MCP server with one `echo` tool.
 - `plugins/clock-plugin` — inprocess-mode starter virtual MCP: a

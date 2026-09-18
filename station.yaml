@@ -20,6 +20,20 @@ logical_servers:
     transport: inprocess
     inprocess:
       command: ./bin/clock-plugin
+      # Tool catalog is declared here, not discovered from the running
+      # plugin — mcp-host never sends mcp/list_tools.
+      tools:
+        - name: now
+          description: Returns the current UTC time in RFC 3339 format.
+          input_schema:
+            type: object
+            properties: {}
+            additionalProperties: false
+          annotations:
+            readOnlyHint: true
+            destructiveHint: false
+            idempotentHint: false
+            openWorldHint: false
     serve:
       http:
         path: /clock
