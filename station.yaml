@@ -39,3 +39,28 @@ logical_servers:
         path: /clock
         allowed_origins: []
         bearer_tokens: []
+
+  - id: github-pilot
+    name: GitHub Releases (api-projection pilot)
+    description: >-
+      Process-mode virtual MCP — CW-20260918-0054 / ATLAS-FOLLOWUP-013's
+      api-projection pilot. Projects one read-only GitHub REST operation
+      (list releases) through a manifest-driven interpreter; see
+      ../../libs/api-projection and its pilots/github-releases/ manifest.
+    transport: process
+    process:
+      command: ./bin/api-projection-server
+      args:
+        - -manifest
+        - ../../libs/api-projection/pilots/github-releases/manifest.yaml
+      env:
+        # Resolved from the OS keychain before spawn — see
+        # internal/secretref.Resolve, called from cmd/station before
+        # mcphost.Run. This process itself never touches the credential
+        # store (adr_api_to_mcp_projection, decision 4).
+        GITHUB_TOKEN: "keychain://api-projection/github-pilot"
+    serve:
+      http:
+        path: /github-pilot
+        allowed_origins: []
+        bearer_tokens: []

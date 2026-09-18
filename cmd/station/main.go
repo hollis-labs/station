@@ -24,6 +24,8 @@ import (
 
 	mcphost "github.com/hollis-labs/mcp-host"
 	"github.com/hollis-labs/mcp-host/config"
+
+	"github.com/hollis-labs/station/internal/secretref"
 )
 
 // version is a placeholder until this binary has a real release
@@ -82,6 +84,15 @@ func runServe(args []string) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Resolve any keychain://…/helper://… credential references in a
+	// process-mode logical server's env before spawning it — see
+	// internal/secretref. A logical server with no reference-valued env
+	// entries is unaffected.
+	if err := secretref.Resolve(ctx, cfg); err != nil {
+		logger.Error("station: failed to resolve credential references", "err", err)
+		return 1
+	}
 
 	if err := mcphost.Run(ctx, cfg, mcphost.Options{Logger: logger, HTTPAddr: *httpAddr}); err != nil {
 		logger.Error("station: run failed", "err", err)
