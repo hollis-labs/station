@@ -5,6 +5,28 @@ generic dual-transport MCP plugin host library, `libs/mcp-host` in this
 portfolio). Station itself stays thin — see `README.md` for the package
 map — and defers everything host-shaped to the library.
 
+## Where Station is
+
+Not released, not deployed, no consumers. Public repo from the start —
+built in the open as a prototype proving `mcp-host` is feature-complete
+enough to build on, not yet a product with users. Chrispian decides when
+that changes — there are no criteria to meet and no date.
+
+So **release readiness is a direction, not a phase.** Security, testing and
+release prep are ordinary work competing on merit with features, bug fixes
+and everything else, sequenced by Chrispian's direction each session. A
+`public-release` tag names the subject, never the urgency, and a board
+sorted by it is not a plan.
+
+The reasoning is `~/dev/projects/agent-setup/docs/what-a-check-may-assert.md`,
+*Tighten at the first real consumer*: until someone outside the project can
+be broken by a regression, the cost of a regression is one session noticing.
+
+**Where this stops.** This is not licence to skip verification. Data
+integrity, security boundaries, and anything that can silently lose work
+still get the real treatment — what changes is what gets *scheduled*, not
+how carefully it is done once it is.
+
 ## Start Here
 
 - `README.md` covers the quickstart, config, and package map.

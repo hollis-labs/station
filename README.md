@@ -1,17 +1,22 @@
 # Station
 
 Station is a prototype built on
-[`github.com/hollis-labs/mcp-host`](../../libs/mcp-host): the generic
-dual-transport MCP plugin host library. Station itself is thin — flag
-parsing, its own config, and two starter virtual MCPs — proving the
+[`github.com/hollis-labs/mcp-host`](https://github.com/hollis-labs/mcp-host):
+the generic dual-transport MCP plugin host library. Station itself is thin —
+flag parsing, its own config, and two starter virtual MCPs — proving the
 library is feature-complete enough to build a real product on top of.
+
+> **Pre-release.** Station is unreleased, not deployed, and has no outside
+> consumers. It's being built in the open: the code, the docs, and this
+> README describe what exists today, not a pitch for what's planned.
+> Interfaces and behavior change without notice, and there are no
+> compatibility guarantees yet.
 
 ## Status
 
-Pre-v1, no consumers yet, built on `mcp-host v0.1.0`. Two working virtual
-MCPs (`echo`, process-mode; `clock`, inprocess-mode) run simultaneously,
-each independently reachable, each recovering from a real process kill —
-see `cmd/station/smoke_test.go`.
+Built on `mcp-host v0.1.0`. Two working virtual MCPs (`echo`, process-mode;
+`clock`, inprocess-mode) run simultaneously, each independently reachable,
+each recovering from a real process kill — see `cmd/station/smoke_test.go`.
 
 ## Quickstart
 
@@ -40,10 +45,10 @@ other machine) fetches it from GitHub like any other dependency.
 ## Config
 
 Station's own `station.yaml` configures its two starter virtual MCPs. See
-`libs/mcp-host/README.md` for the full config schema, the process/inprocess
-transport split, and how to add a new logical server — Station's config is
-just an instance of that schema, nothing Station-specific about the format
-itself.
+[mcp-host's README](https://github.com/hollis-labs/mcp-host#config) for the
+full config schema, the process/inprocess transport split, and how to add a
+new logical server — Station's config is just an instance of that schema,
+nothing Station-specific about the format itself.
 
 ## Package map
 
@@ -77,9 +82,13 @@ seconds — that's the point, not a flake.
 
 ## Known gaps
 
-Everything in `libs/mcp-host/README.md`'s "Known gaps and boundaries"
-applies here too — Station doesn't work around any of them, it just
-consumes the library as-is. Station-specific: the two starter plugins are
-demonstration tools, not a real product surface yet; swapping them for
-Station's actual first capability is the next real step, not blocked on
-anything in the library today.
+Everything in [mcp-host's README](https://github.com/hollis-labs/mcp-host#known-gaps-and-boundaries)
+"Known gaps and boundaries" applies here too — Station doesn't work around
+any of them, it just consumes the library as-is. Station-specific: the two
+starter plugins are demonstration tools, not a real product surface yet;
+swapping them for Station's actual first capability is the next real step,
+not blocked on anything in the library today.
+
+## License
+
+MIT License — see [`LICENSE`](./LICENSE). © 2026 Chrispian Burks / Hollis Labs.
