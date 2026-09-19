@@ -14,7 +14,7 @@ library is feature-complete enough to build a real product on top of.
 
 ## Status
 
-Built on `mcp-host v0.2.0`. Two working virtual MCPs (`echo`, process-mode;
+Built on `mcp-host v0.2.0`. Three working virtual MCPs (`echo`, process-mode;
 `clock`, inprocess-mode) run simultaneously, each independently reachable,
 each recovering from a real process kill — see `cmd/station/smoke_test.go`.
 
@@ -23,6 +23,7 @@ each recovering from a real process kill — see `cmd/station/smoke_test.go`.
 ```bash
 go build -o bin/echo-server ./plugins/echo-server
 go build -o bin/clock-plugin ./plugins/clock-plugin
+go build -o bin/atlas-server ./plugins/atlas-server
 go build -o station ./cmd/station
 
 ./station validate                    # check station.yaml without running anything
@@ -58,6 +59,43 @@ agent-callable tools. An agent builds with Station by editing
 `station.yaml` and running `validate`/`list` to check its work, the same
 way an operator would.
 
+## Atlas
+
+`plugins/atlas-server` is Station's first real capability: a process-mode MCP
+server for the Portfolio Atlas, the curated cross-project record layer that
+lives in Tesseract's knowledge domain under `project/atlas/knowledge`. Its
+tools are scoped to that namespace (none takes one; a record's class comes from
+its key, so `ATLAS-Q-014` is a Question) and carry the rules Tesseract is
+agnostic to: the key scheme, the class shapes, the closed vocabularies and the
+review lifecycle. Their descriptions are the process documentation.
+
+**This is the read slice.** Nothing here writes to Tesseract:
+
+| Tool | For |
+|---|---|
+| `atlas_guide` | the operating guide: classes, vocabularies, lifecycle, what does not belong in the Atlas |
+| `atlas_get` | one record by key, relationship targets resolved |
+| `atlas_search` | find records by meaning or keyword |
+| `atlas_list` | every record of a class, exhaustively, with filters |
+| `atlas_backlinks` | what points at a key, across all classes |
+| `atlas_review_queue` | what is still unreviewed |
+| `atlas_audit` | where records and the contract disagree, each finding with its basis |
+| `atlas_tags` | the tag vocabulary and near-duplicate spellings |
+
+Records are shown as stored, including where they disagree with the contract
+(the contract is a draft): the audit reports the disagreement and never
+repairs it. Configuration is environment only: `TESSERACT_URL` (default
+`http://127.0.0.1:8089`), `TESSERACT_TOKEN` (default none) and `ATLAS_CACHE_TTL`
+(default `30s`). The write tools and a read-only projection instance for other
+agents are planned, and wait on Tesseract changes; see the Tesseract decision
+`atlas_mcp_target_architecture` (`project/atlas/memory/decisions`).
+
+Two things to know before exposing it. The `/atlas` endpoint in `station.yaml`
+is unauthenticated as written and Atlas includes `visibility:private` records,
+so bind Station to loopback (`-http-addr 127.0.0.1:8080`) or set
+`bearer_tokens` first. And `visibility` is a label, not access control:
+Tesseract fences nothing under `project/*`.
+
 ## Depending on mcp-host
 
 Station depends on the real, published
@@ -71,7 +109,8 @@ other machine) fetches it from GitHub like any other dependency.
 
 ## Config
 
-Station's own `station.yaml` configures its two starter virtual MCPs. See
+Station's own `station.yaml` configures its two starter virtual MCPs, the
+GitHub pilot and Atlas. See
 [mcp-host's README](https://github.com/hollis-labs/mcp-host#config) for the
 full config schema, the process/inprocess transport split, and how to add a
 new logical server — Station's config is just an instance of that schema,
@@ -87,14 +126,25 @@ nothing Station-specific about the format itself.
   standalone MCP server with one `echo` tool.
 - `plugins/clock-plugin` — inprocess-mode starter virtual MCP: a
   plugin-sdk-dialect subprocess with one `now` tool.
+- `plugins/atlas-server` — process-mode Atlas MCP server, the read slice (see
+  above). A thin `main`; the logic is in `internal/atlas/`.
+- `internal/atlas/contract` — the Atlas contract as data: the seven classes,
+  the key scheme, the vocabularies. Validation, the guide tool and the tool
+  schemas all read this one table.
+- `internal/atlas/tesseract` — the narrow read client for Tesseract's HTTP API.
+- `internal/atlas/corpus` — loads the register into an in-memory model, with a
+  short cache and the link index.
+- `internal/atlas/audit` — the rules that measure records against the contract.
+- `internal/atlas/tools` — the MCP tools.
+- `internal/atlas/atlastest` — a fake Tesseract and record builders for tests.
 - `cmd/station/main_test.go` — builds the real binary and drives it with a
   real MCP client over real stdio.
 - `cmd/station/smoke_test.go` — the two-virtual-MCPs acceptance test:
   both plugins running simultaneously under one station process, each
   independently reachable, each killed and confirmed to recover.
 
-Replace either starter plugin with Station's actual first real capability
-whenever that's decided; nothing about the wiring changes.
+The two starter plugins remain demonstrations; the Atlas server is the first
+real capability. Adding another follows the same wiring.
 
 ## Commands
 
@@ -113,9 +163,10 @@ seconds — that's the point, not a flake.
 Everything in [mcp-host's README](https://github.com/hollis-labs/mcp-host#known-gaps-and-boundaries)
 "Known gaps and boundaries" applies here too — Station doesn't work around
 any of them, it just consumes the library as-is. Station-specific: the two
-starter plugins are demonstration tools, not a real product surface yet;
-swapping them for Station's actual first capability is the next real step,
-not blocked on anything in the library today.
+starter plugins are demonstration tools. The Atlas server is read-only: its
+write tools need Tesseract to refuse a duplicate key and a stale `supersedes`
+first (it accepts both silently today), and Station is not deployed, so no
+agent reaches `/atlas` yet.
 
 ## License
 

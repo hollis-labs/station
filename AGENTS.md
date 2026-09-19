@@ -87,3 +87,36 @@ end-to-end, mirroring the library's own `examples/plugins/` (which Station
 does not depend on; these are Station's own copies, since a real
 consumer's product tools shouldn't live inside the library's example
 code).
+
+## Atlas server
+
+`plugins/atlas-server` (a thin `main`) and `internal/atlas/` are Station's
+first real capability: an MCP server for the Portfolio Atlas, the curated
+record layer in Tesseract under `project/atlas/knowledge`. It is a product
+plugin, so it lives here; host logic still belongs in `libs/mcp-host`.
+
+- **The contract table is the one source.** `internal/atlas/contract` holds the
+  classes, key scheme and vocabularies as data; the audit, the `atlas_guide`
+  tool and the tool schemas all read it, so don't restate a vocabulary
+  anywhere else in the code. Each term says whether it is in the contract,
+  proposed, or a convention, because the contract (the `ATLAS-META-*` records
+  in Tesseract) is still a draft. An audit finding says what it is measured
+  against and never repairs anything: whether the record or the contract is
+  wrong is Chrispian's call.
+- **Atlas rules stay here; Tesseract stays agnostic.** Don't ask Tesseract for
+  Atlas-specific behavior. Its generic gaps (a duplicate key and a stale
+  `supersedes` are both accepted silently, and nothing under `project/*` is
+  write-fenced) are why only the read slice exists. The reasoning and the
+  asks are in Tesseract: `project/atlas/memory/decisions/atlas_mcp_target_architecture`
+  and `project/tesseract/workspace/handoff/atlas_write_path_needs_2026_09_19`.
+  The write slice and a read-only projection instance are separate Torque
+  tasks tagged `atlas-mcp`.
+- **Every tool is read-only and takes no namespace.** Their annotations say so
+  and a test enforces both. A tool that writes is the write slice, and is gated
+  as above.
+- **Tests use the fake Tesseract** (`internal/atlas/atlastest`), which speaks
+  the HTTP door's verified shapes, so no test needs a daemon. Don't assert
+  counts of the live register, or that the code agrees with agent-setup's
+  atlas skill files: both drift by design and reconcile at a release.
+- **Exposure.** `/atlas` in `station.yaml` is unauthenticated and Atlas holds
+  `visibility:private` records; see the README before serving beyond loopback.
