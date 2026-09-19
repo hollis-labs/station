@@ -24,6 +24,16 @@ All notable user-facing changes land here.
   invocation still defaults to `serve`. `validate`/`list` are config
   inspection only, no side effects; matches Tangent's convention that MCP
   is the only agent-facing interface, with the CLI staying an ops surface.
+- `plugins/atlas-server` and `internal/atlas/` — Station's first real
+  capability: a process-mode MCP server for the Portfolio Atlas, read slice
+  only. Eight tools scoped to the Atlas namespace in Tesseract, none taking a
+  namespace and all annotated read-only: `atlas_guide`, `atlas_get`,
+  `atlas_search`, `atlas_list`, `atlas_backlinks`, `atlas_review_queue`,
+  `atlas_audit` and `atlas_tags`. Records are shown as stored; the audit reports
+  where they disagree with the (draft) contract, each finding with its basis,
+  and repairs nothing. Registered in `station.yaml` as the `atlas` logical
+  server on `/atlas`. Tests run against a fake Tesseract and drive the real
+  binaries through Station over stdio and HTTP.
 
 ### Changed
 

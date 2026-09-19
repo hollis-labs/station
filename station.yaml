@@ -64,3 +64,32 @@ logical_servers:
         path: /github-pilot
         allowed_origins: []
         bearer_tokens: []
+
+  - id: atlas
+    name: Atlas
+    description: >-
+      Portfolio Atlas tools, read-only. Call atlas_guide first: it explains
+      the record classes, the key scheme (ATLAS-Q-014 is a Question), the
+      vocabularies and what does not belong in the Atlas. Every tool is
+      scoped to the Atlas namespace in Tesseract and none takes a namespace.
+      Records are shown as stored, including where they disagree with the
+      contract: report that, do not fix it in passing.
+    transport: process
+    process:
+      command: ./bin/atlas-server
+      args: []
+      env:
+        TESSERACT_URL: "http://127.0.0.1:8089"
+        # Only if that Tesseract requires a token; a keychain:// reference is
+        # resolved before spawn, like github-pilot's.
+        # TESSERACT_TOKEN: "keychain://..."
+    # HTTP only: stdio belongs to echo, and a config may expose one logical
+    # server that way. NOTE this endpoint is unauthenticated as written
+    # (empty bearer_tokens) and Atlas includes visibility:private records, so
+    # run `station -http-addr 127.0.0.1:8080` or set bearer_tokens before
+    # anything beyond this machine can reach it.
+    serve:
+      http:
+        path: /atlas
+        allowed_origins: []
+        bearer_tokens: []
