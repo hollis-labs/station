@@ -1,31 +1,19 @@
 # Station
 
 Station is a prototype built on `github.com/hollis-labs/mcp-host` (the
-generic dual-transport MCP plugin host library, `libs/mcp-host` in this
-portfolio). Station itself stays thin — see `README.md` for the package
+generic dual-transport MCP plugin host library
+Station itself stays thin — see `README.md` for the package
 map — and defers everything host-shaped to the library.
 
 ## Where Station is
 
-Not released, not deployed, no consumers. Public repo from the start —
-built in the open as a prototype proving `mcp-host` is feature-complete
-enough to build on, not yet a product with users. Chrispian decides when
-that changes — there are no criteria to meet and no date.
+Not released, not deployed, no consumers. It is a public prototype, built in
+the open to prove `mcp-host` is feature-complete enough to build on. Interfaces
+can change without notice.
 
-So **release readiness is a direction, not a phase.** Security, testing and
-release prep are ordinary work competing on merit with features, bug fixes
-and everything else, sequenced by Chrispian's direction each session. A
-`public-release` tag names the subject, never the urgency, and a board
-sorted by it is not a plan.
-
-The reasoning is `~/dev/projects/agent-setup/docs/what-a-check-may-assert.md`,
-*Tighten at the first real consumer*: until someone outside the project can
-be broken by a regression, the cost of a regression is one session noticing.
-
-**Where this stops.** This is not licence to skip verification. Data
-integrity, security boundaries, and anything that can silently lose work
-still get the real treatment — what changes is what gets *scheduled*, not
-how carefully it is done once it is.
+Being pre-release does not license skipping verification: data integrity,
+security boundaries and anything that can silently lose work still get the real
+treatment.
 
 ## Start Here
 
@@ -33,8 +21,8 @@ how carefully it is done once it is.
 - `cmd/station/main.go` is the entire binary — read it before adding
   anything to `main`, since it should stay a thin wrapper around
   `mcphost.Run`, not grow its own host logic.
-- `libs/mcp-host/README.md` and `libs/mcp-host/AGENTS.md` (sibling repo,
-  `../../libs/mcp-host` from here) own everything about the host itself:
+- The `mcp-host` repository's `README.md` and `AGENTS.md` (github.com/hollis-labs/mcp-host)
+  own everything about the host itself:
   config schema, transport modes, known gaps. Read those before assuming
   a limitation is Station's to fix.
 
@@ -47,7 +35,7 @@ go test -race -count=1 ./...
 ```
 
 There is no CI workflow and no Makefile in this repo, so these are the only
-gate (same convention as `mcp-host`/`go-mcp`).
+gate (same convention as `mcp-host` and `go-mcp`).
 
 `go test ./...` builds the real `station` binary and both real plugin
 binaries via `go build`, then drives them as subprocesses with a genuine
@@ -58,22 +46,20 @@ flake.
 ## Boundaries
 
 `go.mod` requires the real, published `github.com/hollis-labs/mcp-host`
-(`v0.2.0`) — no `replace` directive. This repo is also listed in
-`~/dev/hollis-labs/go.work` alongside `libs/mcp-host` for convenience when
-developing both together; that's a local override only, not something
-`go.mod` itself depends on. Bumping the `mcp-host` version here should
-follow a real tag on that repo, not a local, untagged change.
+(`v0.2.0`) — no `replace` directive. There is no tracked or ambient
+`go.work`; both `mcp-host` and this repo now have real tags, so cross-module
+development against an unreleased `mcp-host` change is a throwaway
+`go.work` outside the repos, never a
+`replace`, never a tracked workspace file. Bumping the `mcp-host` version
+here should follow a real tag on that repo, not a local, untagged change.
 
-MCP is the only agent-facing interface — verified against Tangent's own
-source and docs, which state this explicitly for itself. `cmd/station`'s
+MCP is the only agent-facing interface. `cmd/station`'s
 `validate`/`list`/`version` subcommands are an ops/inspection surface, not
 a second agent API; don't add MCP tools (or an HTTP management API) for
 operating Station itself (listing/adding/restarting logical servers). If
-that need ever becomes real, look at how Tangent's `tangent plugin
-{install,remove,list,dir}` stays CLI-only before reaching for an MCP tool
-instead.
+that need ever becomes real, prefer extending the CLI over adding an MCP tool.
 
-Station should not reimplement anything `libs/mcp-host` already owns —
+Station should not reimplement anything `mcp-host` already owns —
 config parsing, the transport interface, supervision, serving. If a change
 here starts looking like host logic (a new transport mode, a new way to
 expose a logical server, config schema changes), it almost certainly
@@ -91,32 +77,29 @@ code).
 ## Atlas server
 
 `plugins/atlas-server` (a thin `main`) and `internal/atlas/` are Station's
-first real capability: an MCP server for the Portfolio Atlas, the curated
-record layer in Tesseract under `project/atlas/knowledge`. It is a product
-plugin, so it lives here; host logic still belongs in `libs/mcp-host`.
+first real capability: an MCP server for the Portfolio Atlas, a curated record
+layer stored in a Tesseract instance under the `project/atlas/knowledge`
+namespace. It is a product plugin, so it lives here; host logic still belongs
+in `mcp-host`.
 
 - **The contract table is the one source.** `internal/atlas/contract` holds the
   classes, key scheme and vocabularies as data; the audit, the `atlas_guide`
   tool and the tool schemas all read it, so don't restate a vocabulary
   anywhere else in the code. Each term says whether it is in the contract,
-  proposed, or a convention, because the contract (the `ATLAS-META-*` records
-  in Tesseract) is still a draft. An audit finding says what it is measured
-  against and never repairs anything: whether the record or the contract is
-  wrong is Chrispian's call.
+  proposed, or a convention, because the contract is still a draft. An audit
+  finding says what it is measured against and never repairs anything.
 - **Atlas rules stay here; Tesseract stays agnostic.** Don't ask Tesseract for
   Atlas-specific behavior. Its generic gaps (a duplicate key and a stale
   `supersedes` are both accepted silently, and nothing under `project/*` is
-  write-fenced) are why only the read slice exists. The reasoning and the
-  asks are in Tesseract: `project/atlas/memory/decisions/atlas_mcp_target_architecture`
-  and `project/tesseract/workspace/handoff/atlas_write_path_needs_2026_09_19`.
-  The write slice and a read-only projection instance are separate Torque
-  tasks tagged `atlas-mcp`.
+  write-fenced) are why only the read slice exists.
 - **Every tool is read-only and takes no namespace.** Their annotations say so
-  and a test enforces both. A tool that writes is the write slice, and is gated
-  as above.
+  and a test enforces both. A tool that writes belongs to a future write slice.
 - **Tests use the fake Tesseract** (`internal/atlas/atlastest`), which speaks
-  the HTTP door's verified shapes, so no test needs a daemon. Don't assert
-  counts of the live register, or that the code agrees with agent-setup's
-  atlas skill files: both drift by design and reconcile at a release.
+  the HTTP API's verified shapes, so no test needs a daemon. Don't assert
+  counts of a live register: they drift by design.
 - **Exposure.** `/atlas` in `station.yaml` is unauthenticated and Atlas holds
-  `visibility:private` records; see the README before serving beyond loopback.
+  `visibility:private` records; see the README and `SECURITY.md` before
+  serving beyond loopback.
+
+Open a pull request for changes; a maintainer will review it. See
+`CONTRIBUTING.md`.
