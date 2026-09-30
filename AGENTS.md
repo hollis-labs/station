@@ -1,8 +1,7 @@
 # Station
 
 Station is a prototype built on `github.com/hollis-labs/mcp-host` (the
-generic dual-transport MCP plugin host library
-Station itself stays thin — see `README.md` for the package
+generic dual-transport MCP plugin host library). Station itself stays thin — see `README.md` for the package
 map — and defers everything host-shaped to the library.
 
 ## Where Station is
