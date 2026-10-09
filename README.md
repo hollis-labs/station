@@ -1,7 +1,7 @@
 # Station
 
 Station is a prototype built on
-[`github.com/hollis-labs/mcp-host`](https://github.com/hollis-labs/mcp-host):
+[`github.com/hollis-labs/libs/plugin-mcp/mcp-host`](https://github.com/hollis-labs/libs/tree/main/plugin-mcp/mcp-host):
 the generic dual-transport MCP plugin host library. Station itself is thin —
 flag parsing, its own config, and two starter virtual MCPs — proving the
 library is feature-complete enough to build a real product on top of.
@@ -14,7 +14,7 @@ library is feature-complete enough to build a real product on top of.
 
 ## Status
 
-Built on `mcp-host v0.2.0`. Three working virtual MCPs (`echo`, process-mode;
+Built on the released `libs/plugin-mcp` module. Two demonstration virtual MCPs (`echo`, process-mode;
 `clock`, inprocess-mode) run simultaneously, each independently reachable,
 each recovering from a real process kill — see `cmd/station/smoke_test.go`.
 
@@ -28,7 +28,7 @@ go build -o station ./cmd/station
 
 ./station validate                    # check station.yaml without running anything
 ./station list                        # see what's configured
-./station serve -http-addr :8080      # or just `./station` — serve is the default
+./station serve -http-addr 127.0.0.1:8080 -plugin-state-dir ./plugin-state
 ```
 
 This serves `echo` over stdio and `clock` over HTTP at `/clock`
@@ -98,20 +98,24 @@ Tesseract fences nothing under `project/*`.
 
 ## Depending on mcp-host
 
-Station depends on the real, published
-[`github.com/hollis-labs/mcp-host`](https://github.com/hollis-labs/mcp-host)
-(`v0.2.0` as of this writing) — no `replace` directive needed. Both repos
-are also listed in `~/dev/hollis-labs/go.work` for convenience when
-developing them together locally; that workspace entry overrides
-resolution to the local checkout, but `go.mod`'s own `require` line is a
-real version, so a build outside this workspace (`GOWORK=off`, or any
-other machine) fetches it from GitHub like any other dependency.
+Station requires the single published `github.com/hollis-labs/libs/plugin-mcp`
+module at the version recorded in `go.mod`. SDK, host, MCP and API projection
+imports are packages in that module; no standalone legacy module or committed
+`replace`/`go.work` is needed. Build with `GOWORK=off` to use the release.
+
+Inprocess plugins run on plugin-host's driver. Station owns the clock's policy:
+`-plugin-state-dir` explicitly selects its data/cache root, the current host
+process issues a random epoch and monotonically increasing generations, and
+`clock-plugin` version `0.1.0` is checked before Load. Clock has no reverse host
+calls and receives an explicit empty grant set. Other inprocess plugins need
+an explicit Station policy; their identity or grants are not guessed from YAML.
+Process-mode echo, GitHub and Atlas transports retain their existing behavior.
 
 ## Config
 
 Station's own `station.yaml` configures its two starter virtual MCPs, the
 GitHub pilot and Atlas. See
-[mcp-host's README](https://github.com/hollis-labs/mcp-host#config) for the
+[mcp-host's README](https://github.com/hollis-labs/libs/tree/main/plugin-mcp/mcp-host#config) for the
 full config schema, the process/inprocess transport split, and how to add a
 new logical server — Station's config is just an instance of that schema,
 nothing Station-specific about the format itself.
@@ -121,7 +125,8 @@ nothing Station-specific about the format itself.
 - `cmd/station/main.go` — the whole binary: subcommand dispatch
   (`serve`/`validate`/`list`/`version`), flag parsing, config loading, then
   a single call into `mcphost.Run` for `serve`. Everything host-shaped
-  lives in the library.
+  lives in the library. `plugin_policy.go` supplies Station's clock identity,
+  root and no-authority policy; it does not implement a host lifecycle.
 - `plugins/echo-server` — process-mode starter virtual MCP: a real,
   standalone MCP server with one `echo` tool.
 - `plugins/clock-plugin` — inprocess-mode starter virtual MCP: a
@@ -160,7 +165,7 @@ seconds — that's the point, not a flake.
 
 ## Known gaps
 
-Everything in [mcp-host's README](https://github.com/hollis-labs/mcp-host#known-gaps-and-boundaries)
+Everything in [mcp-host's README](https://github.com/hollis-labs/libs/tree/main/plugin-mcp/mcp-host#known-gaps-and-boundaries)
 "Known gaps and boundaries" applies here too — Station doesn't work around
 any of them, it just consumes the library as-is. Station-specific: the two
 starter plugins are demonstration tools. The Atlas server is read-only: its

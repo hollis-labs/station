@@ -1,4 +1,4 @@
-// Command station is a prototype built on github.com/hollis-labs/mcp-host:
+// Command station is a prototype built on github.com/hollis-labs/libs/plugin-mcp/mcp-host:
 // two starter virtual MCPs (an echo server and a clock plugin, one per
 // transport mode) proving the host library is feature-complete enough to
 // build a real product on. See ../../station.yaml for the config and
@@ -22,8 +22,8 @@ import (
 	"strings"
 	"syscall"
 
-	mcphost "github.com/hollis-labs/mcp-host"
-	"github.com/hollis-labs/mcp-host/config"
+	mcphost "github.com/hollis-labs/libs/plugin-mcp/mcp-host"
+	"github.com/hollis-labs/libs/plugin-mcp/mcp-host/config"
 
 	"github.com/hollis-labs/station/internal/secretref"
 )
@@ -69,6 +69,7 @@ func splitSubcommand(args []string) (string, []string) {
 func runServe(args []string) int {
 	fs := flag.NewFlagSet("station serve", flag.ContinueOnError)
 	configPath := fs.String("config", "station.yaml", "path to the logical-server config file")
+	pluginStateDir := fs.String("plugin-state-dir", "", "owner-selected data/cache directory for inprocess plugins")
 	httpAddr := fs.String("http-addr", ":8080", "address to serve HTTP-exposed logical servers on, if any are configured")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -94,7 +95,13 @@ func runServe(args []string) int {
 		return 1
 	}
 
-	if err := mcphost.Run(ctx, cfg, mcphost.Options{Logger: logger, HTTPAddr: *httpAddr}); err != nil {
+	factories, err := clockInitFactories(ctx, cfg, *pluginStateDir)
+	if err != nil {
+		logger.Error("station: plugin initialization policy", "err", err)
+		return 1
+	}
+
+	if err := mcphost.Run(ctx, cfg, mcphost.Options{Logger: logger, HTTPAddr: *httpAddr, InprocessInitFactories: factories}); err != nil {
 		logger.Error("station: run failed", "err", err)
 		return 1
 	}

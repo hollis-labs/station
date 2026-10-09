@@ -13,7 +13,7 @@ import (
 	"context"
 	"log"
 
-	gmcpserver "github.com/hollis-labs/go-mcp/server"
+	gmcpserver "github.com/hollis-labs/libs/plugin-mcp/go-mcp/server"
 )
 
 func main() {

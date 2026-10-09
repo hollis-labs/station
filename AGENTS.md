@@ -1,6 +1,6 @@
 # Station
 
-Station is a prototype built on `github.com/hollis-labs/mcp-host` (the
+Station is a prototype built on `github.com/hollis-labs/libs/plugin-mcp/mcp-host` (the
 generic dual-transport MCP plugin host library). Station itself stays thin — see `README.md` for the package
 map — and defers everything host-shaped to the library.
 
@@ -20,7 +20,7 @@ treatment.
 - `cmd/station/main.go` is the entire binary — read it before adding
   anything to `main`, since it should stay a thin wrapper around
   `mcphost.Run`, not grow its own host logic.
-- The `mcp-host` repository's `README.md` and `AGENTS.md` (github.com/hollis-labs/mcp-host)
+- The `mcp-host` repository's `README.md` and `AGENTS.md` (github.com/hollis-labs/libs/plugin-mcp/mcp-host)
   own everything about the host itself:
   config schema, transport modes, known gaps. Read those before assuming
   a limitation is Station's to fix.
@@ -33,8 +33,8 @@ go vet ./...
 go test -race -count=1 ./...
 ```
 
-There is no CI workflow and no Makefile in this repo, so these are the only
-gate (same convention as `mcp-host` and `go-mcp`).
+The Go workflow runs these checks and the real-child tests on Linux. There is
+no Makefile.
 
 `go test ./...` builds the real `station` binary and both real plugin
 binaries via `go build`, then drives them as subprocesses with a genuine
@@ -44,13 +44,12 @@ flake.
 
 ## Boundaries
 
-`go.mod` requires the real, published `github.com/hollis-labs/mcp-host`
-(`v0.2.0`) — no `replace` directive. There is no tracked or ambient
-`go.work`; both `mcp-host` and this repo now have real tags, so cross-module
-development against an unreleased `mcp-host` change is a throwaway
-`go.work` outside the repos, never a
-`replace`, never a tracked workspace file. Bumping the `mcp-host` version
-here should follow a real tag on that repo, not a local, untagged change.
+`go.mod` requires the published `github.com/hollis-labs/libs/plugin-mcp`
+module. All SDK/MCP/host imports use its package roots. No committed `replace`
+or `go.work`; final consumer gates use the actual published release. Clock's
+explicit owner policy is in `cmd/station/plugin_policy.go`; plugin-host owns
+inprocess subprocess lifecycle, protocol and grants validation. Do not duplicate
+its supervisor or wire codec here. `-plugin-state-dir` is required for clock.
 
 MCP is the only agent-facing interface. `cmd/station`'s
 `validate`/`list`/`version` subcommands are an ops/inspection surface, not

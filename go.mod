@@ -2,11 +2,10 @@ module github.com/hollis-labs/station
 
 go 1.26.8
 
+toolchain go1.26.9
+
 require (
-	github.com/hollis-labs/api-projection v0.1.0
-	github.com/hollis-labs/go-mcp v0.7.0
-	github.com/hollis-labs/mcp-host v0.2.0
-	github.com/hollis-labs/plugin-sdk v0.5.0
+	github.com/hollis-labs/libs/plugin-mcp v0.1.1
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 )
 
