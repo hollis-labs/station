@@ -1,0 +1,29 @@
+name: Go
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
+      GOMAXPROCS: "4"
+      GOFLAGS: "-p=2"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Format
+        run: test -z "$(gofmt -l .)"
+      - name: Dependencies
+        run: go mod tidy -diff
+      - name: Build and vet
+        run: |
+          go build ./...
+          go vet ./...
+      - name: Tests with real Station and plugin children
+        run: go test -race -count=1 -timeout 4m ./...

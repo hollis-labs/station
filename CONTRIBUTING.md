@@ -1,7 +1,7 @@
 # Contributing to Station
 
 Station is a pre-release prototype built on
-[`mcp-host`](https://github.com/hollis-labs/mcp-host). Contributions are
+[`mcp-host`](https://github.com/hollis-labs/libs/tree/main/plugin-mcp/mcp-host). Contributions are
 welcome; the bar is correct, minimal, well-tested Go.
 
 ## Before you start
@@ -19,7 +19,7 @@ welcome; the bar is correct, minimal, well-tested Go.
 1. **Open an issue or discussion first** for anything larger than a small fix.
 2. **Branch from `main`** using `feat/<topic>`, `fix/<topic>` or `docs/<topic>`.
 3. **Change one thing per branch** and keep commits small and coherent.
-4. **Run the checks** before opening a pull request (there is no CI):
+4. **Run the checks** before opening a pull request (also run by the Go workflow):
 
    ```bash
    gofmt -l .

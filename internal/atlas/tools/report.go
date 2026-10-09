@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	gmcpserver "github.com/hollis-labs/go-mcp/server"
+	gmcpserver "github.com/hollis-labs/libs/plugin-mcp/go-mcp/server"
 
 	"github.com/hollis-labs/station/internal/atlas/audit"
 	"github.com/hollis-labs/station/internal/atlas/contract"

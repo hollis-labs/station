@@ -23,8 +23,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hollis-labs/api-projection/credential"
-	"github.com/hollis-labs/mcp-host/config"
+	"github.com/hollis-labs/libs/plugin-mcp/api-projection/credential"
+	"github.com/hollis-labs/libs/plugin-mcp/mcp-host/config"
 )
 
 // resolver is the seam credential.Resolver satisfies — narrowed to what

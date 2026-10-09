@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/hollis-labs/mcp-host/config"
+	"github.com/hollis-labs/libs/plugin-mcp/mcp-host/config"
 )
 
 type fakeResolver map[string]string

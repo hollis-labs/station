@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-mcp/budget"
-	gmcpserver "github.com/hollis-labs/go-mcp/server"
+	"github.com/hollis-labs/libs/plugin-mcp/go-mcp/budget"
+	gmcpserver "github.com/hollis-labs/libs/plugin-mcp/go-mcp/server"
 
 	"github.com/hollis-labs/station/internal/atlas/atlastest"
 	"github.com/hollis-labs/station/internal/atlas/audit"

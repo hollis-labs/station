@@ -5,7 +5,7 @@
 //
 // Its tool catalog is declared in ../../station.yaml's inprocess.tools
 // block, not here — mcp-host never sends mcp/list_tools to a running
-// plugin (see github.com/hollis-labs/mcp-host's transport/inprocess
+// plugin (see github.com/hollis-labs/libs/plugin-mcp/mcp-host's transport/inprocess
 // package doc), which is what makes plugin-sdk's own documented
 // subprocess.Serve helper usable here.
 //
@@ -19,8 +19,8 @@ import (
 	"os"
 	"time"
 
-	plugin "github.com/hollis-labs/plugin-sdk"
-	sdksub "github.com/hollis-labs/plugin-sdk/subprocess"
+	plugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
+	sdksub "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
 )
 
 type clockPlugin struct{}
@@ -28,8 +28,9 @@ type clockPlugin struct{}
 func (clockPlugin) Init(ctx context.Context, params sdksub.InitParams) (sdksub.InitResult, error) {
 	return sdksub.InitResult{
 		ID: "clock-plugin", Name: "Clock Plugin", Version: "0.1.0",
-		Description: "Reports the current time.",
-		Protocol:    sdksub.ProtocolVersion,
+		Description:        "Reports the current time.",
+		Protocol:           sdksub.ProtocolVersion,
+		CapabilityContract: 1,
 	}, nil
 }
 
