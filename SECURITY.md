@@ -35,26 +35,25 @@ Station hosts MCP servers over stdio and HTTP. As shipped, the HTTP endpoints in
 - Set `bearer_tokens` on any endpoint before serving beyond loopback.
 - There is no built-in TLS. Use a trusted TLS-terminating proxy, VPN or SSH
   tunnel for remote access.
-- The `/atlas` endpoint serves Atlas records, **including `visibility:private`
-  ones**. `visibility` is a label, not access control; the upstream Tesseract
-  fences nothing under `project/*`.
+- A plugin's tools are only as private as the data behind them. For example the
+  Atlas server (now in `station-plugins`) serves **`visibility:private`**
+  records; `visibility` is a label, not access control, and Tesseract fences
+  nothing under `project/*`. Read each plugin's README before exposing it.
 - Station spawns the plugin processes `station.yaml` names, with the authority
   of the user running it. Treat the config file as executable configuration.
 
 ## Data at rest
 
-Station keeps no database of its own. The Atlas server keeps a short in-memory
-read cache (`ATLAS_CACHE_TTL`). Records live in the Tesseract instance it reads
-from (`TESSERACT_URL`, default `http://127.0.0.1:8089`); see that project's
-security policy for storage.
+Station keeps no database of its own; any data a plugin holds is described in
+that plugin's README.
 
 Credentials: prefer `keychain://…` references in `station.yaml` and environment
-variables (`TESSERACT_TOKEN`) over literal values, and do not commit tokens.
+variables over literal values, and do not commit tokens.
 
 ## External data processors
 
 Station makes no outbound calls of its own beyond the upstreams you configure:
-Tesseract for Atlas, and any API a plugin such as `github-pilot` is pointed at.
+any API a plugin such as `github-pilot` is pointed at.
 Data sent there is governed by those services.
 
 ## Current security limitations
@@ -62,7 +61,6 @@ Data sent there is governed by those services.
 - shipped HTTP endpoints are unauthenticated by default
 - README examples bind all interfaces
 - no built-in TLS
-- Atlas `visibility` labels are not enforced by Station or Tesseract
 - pre-release: interfaces and behavior change without notice
 
 These are deployment constraints, not hidden roadmap promises. Operate within

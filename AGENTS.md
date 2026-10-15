@@ -73,32 +73,7 @@ does not depend on; these are Station's own copies, since a real
 consumer's product tools shouldn't live inside the library's example
 code).
 
-## Atlas server
-
-`plugins/atlas-server` (a thin `main`) and `internal/atlas/` are Station's
-first real capability: an MCP server for the Portfolio Atlas, a curated record
-layer stored in a Tesseract instance under the `project/atlas/knowledge`
-namespace. It is a product plugin, so it lives here; host logic still belongs
-in `mcp-host`.
-
-- **The contract table is the one source.** `internal/atlas/contract` holds the
-  classes, key scheme and vocabularies as data; the audit, the `atlas_guide`
-  tool and the tool schemas all read it, so don't restate a vocabulary
-  anywhere else in the code. Each term says whether it is in the contract,
-  proposed, or a convention, because the contract is still a draft. An audit
-  finding says what it is measured against and never repairs anything.
-- **Atlas rules stay here; Tesseract stays agnostic.** Don't ask Tesseract for
-  Atlas-specific behavior. Its generic gaps (a duplicate key and a stale
-  `supersedes` are both accepted silently, and nothing under `project/*` is
-  write-fenced) are why only the read slice exists.
-- **Every tool is read-only and takes no namespace.** Their annotations say so
-  and a test enforces both. A tool that writes belongs to a future write slice.
-- **Tests use the fake Tesseract** (`internal/atlas/atlastest`), which speaks
-  the HTTP API's verified shapes, so no test needs a daemon. Don't assert
-  counts of a live register: they drift by design.
-- **Exposure.** `/atlas` in `station.yaml` is unauthenticated and Atlas holds
-  `visibility:private` records; see the README and `SECURITY.md` before
-  serving beyond loopback.
+Atlas moved to `station-plugins` (`atlas-server`); Station keeps only the echo and clock starters here.
 
 Open a pull request for changes; a maintainer will review it. See
 `CONTRIBUTING.md`.
