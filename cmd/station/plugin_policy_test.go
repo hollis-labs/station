@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hollis-labs/libs/plugin-mcp/mcp-host/config"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/mcp-host/config"
 )
 
 func TestClockPolicyRequiresExplicitRootAndFreshGenerations(t *testing.T) {
