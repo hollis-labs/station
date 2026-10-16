@@ -1,7 +1,7 @@
 # Station
 
 Station is a prototype built on
-[`github.com/hollis-labs/libs/plugin-mcp/mcp-host`](https://github.com/hollis-labs/libs/tree/main/plugin-mcp/mcp-host):
+[`github.com/hollis-labs/libs/mcp/plugin-mcp/mcp-host`](https://github.com/hollis-labs/libs/tree/main/mcp/plugin-mcp/mcp-host):
 the generic dual-transport MCP plugin host library. Station itself is thin —
 flag parsing, its own config, and two starter virtual MCPs — proving the
 library is feature-complete enough to build a real product on top of.
@@ -98,7 +98,7 @@ Tesseract fences nothing under `project/*`.
 
 ## Depending on mcp-host
 
-Station requires the single published `github.com/hollis-labs/libs/plugin-mcp`
+Station requires the single published `github.com/hollis-labs/libs/mcp/plugin-mcp`
 module at the version recorded in `go.mod`. SDK, host, MCP and API projection
 imports are packages in that module; no standalone legacy module or committed
 `replace`/`go.work` is needed. Build with `GOWORK=off` to use the release.
@@ -115,7 +115,7 @@ Process-mode echo, GitHub and Atlas transports retain their existing behavior.
 
 Station's own `station.yaml` configures its two starter virtual MCPs, the
 GitHub pilot and Atlas. See
-[mcp-host's README](https://github.com/hollis-labs/libs/tree/main/plugin-mcp/mcp-host#config) for the
+[mcp-host's README](https://github.com/hollis-labs/libs/tree/main/mcp/plugin-mcp/mcp-host#config) for the
 full config schema, the process/inprocess transport split, and how to add a
 new logical server — Station's config is just an instance of that schema,
 nothing Station-specific about the format itself.
@@ -165,7 +165,7 @@ seconds — that's the point, not a flake.
 
 ## Known gaps
 
-Everything in [mcp-host's README](https://github.com/hollis-labs/libs/tree/main/plugin-mcp/mcp-host#known-gaps-and-boundaries)
+Everything in [mcp-host's README](https://github.com/hollis-labs/libs/tree/main/mcp/plugin-mcp/mcp-host#known-gaps-and-boundaries)
 "Known gaps and boundaries" applies here too — Station doesn't work around
 any of them, it just consumes the library as-is. Station-specific: the two
 starter plugins are demonstration tools. The Atlas server is read-only: its

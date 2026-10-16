@@ -1,4 +1,4 @@
-// Command station is a prototype built on github.com/hollis-labs/libs/plugin-mcp/mcp-host:
+// Command station is a prototype built on github.com/hollis-labs/libs/mcp/plugin-mcp/mcp-host:
 // two starter virtual MCPs (an echo server and a clock plugin, one per
 // transport mode) proving the host library is feature-complete enough to
 // build a real product on. See ../../station.yaml for the config and
@@ -22,8 +22,8 @@ import (
 	"strings"
 	"syscall"
 
-	mcphost "github.com/hollis-labs/libs/plugin-mcp/mcp-host"
-	"github.com/hollis-labs/libs/plugin-mcp/mcp-host/config"
+	mcphost "github.com/hollis-labs/libs/mcp/plugin-mcp/mcp-host"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/mcp-host/config"
 
 	"github.com/hollis-labs/station/internal/secretref"
 )

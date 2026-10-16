@@ -1,6 +1,6 @@
 # Station
 
-Station is a prototype built on `github.com/hollis-labs/libs/plugin-mcp/mcp-host` (the
+Station is a prototype built on `github.com/hollis-labs/libs/mcp/plugin-mcp/mcp-host` (the
 generic dual-transport MCP plugin host library). Station itself stays thin — see `README.md` for the package
 map — and defers everything host-shaped to the library.
 
@@ -20,7 +20,7 @@ treatment.
 - `cmd/station/main.go` is the entire binary — read it before adding
   anything to `main`, since it should stay a thin wrapper around
   `mcphost.Run`, not grow its own host logic.
-- The `mcp-host` repository's `README.md` and `AGENTS.md` (github.com/hollis-labs/libs/plugin-mcp/mcp-host)
+- The `mcp-host` repository's `README.md` and `AGENTS.md` (github.com/hollis-labs/libs/mcp/plugin-mcp/mcp-host)
   own everything about the host itself:
   config schema, transport modes, known gaps. Read those before assuming
   a limitation is Station's to fix.
@@ -44,7 +44,7 @@ flake.
 
 ## Boundaries
 
-`go.mod` requires the published `github.com/hollis-labs/libs/plugin-mcp`
+`go.mod` requires the published `github.com/hollis-labs/libs/mcp/plugin-mcp`
 module. All SDK/MCP/host imports use its package roots. No committed `replace`
 or `go.work`; final consumer gates use the actual published release. Clock's
 explicit owner policy is in `cmd/station/plugin_policy.go`; plugin-host owns

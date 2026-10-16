@@ -1,7 +1,7 @@
 # Contributing to Station
 
 Station is a pre-release prototype built on
-[`mcp-host`](https://github.com/hollis-labs/libs/tree/main/plugin-mcp/mcp-host). Contributions are
+[`mcp-host`](https://github.com/hollis-labs/libs/tree/main/mcp/plugin-mcp/mcp-host). Contributions are
 welcome; the bar is correct, minimal, well-tested Go.
 
 ## Before you start
