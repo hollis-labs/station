@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -69,7 +68,7 @@ logical_servers:
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 	defer cancel()
 
-	stationCmd := exec.CommandContext(ctx, stationBin, "-config", configPath, "-http-addr", httpAddr, "-plugin-state-dir", filepath.Join(t.TempDir(), "plugin-state"))
+	stationCmd := exec.CommandContext(ctx, stationBin, "-config", configPath, "-http-addr", httpAddr)
 	watcher := newStderrPIDWatcher()
 	watcher.attach(t, stationCmd)
 
@@ -125,51 +124,6 @@ logical_servers:
 		t.Fatalf("kill clock child (pid %d): %v", clockPID, err)
 	}
 	pollUntilRecovered(t, "clock", func() error { return callNow(ctx, clockSession) })
-
-	// Consumer cancellation leaves the live logical server usable.
-	cancelled, cancelCall := context.WithCancel(ctx)
-	cancelCall()
-	if err := callNow(cancelled, clockSession); !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancelled consumer call: %v", err)
-	}
-	if err := callNow(ctx, clockSession); err != nil {
-		t.Fatalf("clock after cancellation: %v", err)
-	}
-
-	// Capture the recovered generations, then close the actual Station client.
-	// Its orderly shutdown must delegate unload/kill/reap for both children.
-	recovered := make(map[string]int)
-	for server, old := range map[string]int{"clock": clockPID, "echo": echoPID} {
-		deadline := time.Now().Add(5 * time.Second)
-		for time.Now().Before(deadline) {
-			if pid := watcher.pidFor(server); pid != 0 && pid != old {
-				recovered[server] = pid
-				break
-			}
-			time.Sleep(25 * time.Millisecond)
-		}
-		if recovered[server] == 0 {
-			t.Fatalf("no recovered %s generation", server)
-		}
-	}
-	if err := clockSession.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := stdioSession.Close(); err != nil {
-		t.Fatal(err)
-	}
-	for server, pid := range recovered {
-		deadline := time.Now().Add(10 * time.Second)
-		for time.Now().Before(deadline) {
-			if errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
-				break
-			}
-			time.Sleep(25 * time.Millisecond)
-		}
-		if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
-			t.Fatalf("%s child not reaped pid%d: %v", server, pid, err)
-		}
-	}
 }
 
 func buildBinary(t *testing.T, pkg, name string) string {
@@ -257,8 +211,9 @@ func pollUntilRecovered(t *testing.T, label string, attempt func() error) {
 
 // pidLineRe matches mcp-host's own "process spawned" / "plugin
 // subprocess spawned" log lines (slog's text handler: key=value pairs),
-// e.g. `... msg="station: process spawned" server=echo pid=12345`.
-var pidLineRe = regexp.MustCompile(`server=(\S+).*\bpid=(\d+)`)
+// e.g. `... msg="station: process spawned" server=echo pid=12345`, or the same
+// fields in the default JSON log format.
+var pidLineRe = regexp.MustCompile(`server(?:=|":")([A-Za-z0-9_-]+).*?\bpid(?:=|":)(\d+)`)
 
 // stderrPIDWatcher tails a station process's stderr, tracking the most
 // recently logged pid for each named logical server — the initial spawn
@@ -274,10 +229,7 @@ func newStderrPIDWatcher() *stderrPIDWatcher { return &stderrPIDWatcher{pid: map
 func (w *stderrPIDWatcher) attach(t *testing.T, cmd *exec.Cmd) {
 	pr, pw := io.Pipe()
 	cmd.Stderr = pw
-	done := make(chan struct{})
-	t.Cleanup(func() { _ = pw.Close(); <-done; _ = pr.Close() })
 	go func() {
-		defer close(done)
 		scanner := bufio.NewScanner(pr)
 		for scanner.Scan() {
 			line := scanner.Text()

@@ -14,7 +14,7 @@ library is feature-complete enough to build a real product on top of.
 
 ## Status
 
-Built on the released `libs/mcp/plugin-mcp` module. Two demonstration virtual MCPs (`echo`, process-mode;
+Built on `plugin-mcp v0.4.0`. Three working virtual MCPs (`echo`, process-mode;
 `clock`, inprocess-mode) run simultaneously, each independently reachable,
 each recovering from a real process kill — see `cmd/station/smoke_test.go`.
 
@@ -27,7 +27,7 @@ go build -o station ./cmd/station
 
 ./station validate                    # check station.yaml without running anything
 ./station list                        # see what's configured
-./station serve -http-addr 127.0.0.1:8080 -plugin-state-dir ./plugin-state
+./station serve -http-addr :8080      # or just `./station` — serve is the default
 ```
 
 This serves `echo` over stdio and `clock` over HTTP at `/clock`
@@ -67,20 +67,97 @@ it to `station.yaml` as a process-mode logical server; its README has the
 config, including the exposure note (Atlas holds `visibility:private` records:
 use loopback or `bearer_tokens`).
 
+## Plugin platform and the LLM gateway
+
+Station's core hosts MCP logical servers and, when asked, one HTTP API
+assembled with `app-host` (`platform/`). Product features are plugins that
+register through a small hook set: `Mount` (routes under `/api/<plugin>/`, each
+with a required auth scope), `UseMiddleware` (ordered by phase, with a declared
+failure mode), `AddTransport` (extra listeners) and `OnStop`. A plugin runs only
+when its block exists in the API config. See `api.example.yaml`.
+
+`plugins/llm-gateway` is a transparent relay, not an envelope gateway
+(CW-20261013-0030). A request arriving on a provider-native endpoint goes to an
+upstream speaking the same protocol and the bytes pass through; the gateway only
+swaps in the hub-held credential, rewrites the `model` field (and, for OpenAI
+streams, asks the upstream for usage and hides that chunk again unless the
+client asked), and reads usage from the response. Endpoints, under
+`/api/llm-gateway`:
+
+- `POST /v1/chat/completions` and `POST /v1/responses` (OpenAI), base URL `.../api/llm-gateway/v1`
+- `POST /v1/messages` (Anthropic), base URL `.../api/llm-gateway`, key via `x-api-key`
+- `POST /v1/embeddings` (OpenAI), for models with `kind: embedding`
+- `POST /v1/systemone` (JEV), for models with `kind: decision`. A decision model is an LLM like the others (provider, target, policy, guard, ledger); only its dialect differs. Question order is preserved byte for byte, and the answers are kept in the ledger
+- `GET /v1/models` (shape follows the `anthropic-version` header; decision models are not listed; includes resolved capabilities, pricing, context/output limits, modalities, and model metadata)
+- `GET /v1/catalog?provider=&model=&family=` and `POST /v1/catalog/refresh`: centralized model catalog (`llm/core/modelsdev` + `llm/core/pricesource`) cached on disk and refreshed in the background with a default `90s` TTL (`catalog.ttl` in `api.yaml`)
+- `GET /v1/usage?limit=&principal=&since=`
+
+Pattern: a `Dialect` adapter per wire protocol, `provider` + `target` with
+`ProviderCapabilities` resolved from `models.dev` and operator overrides (a request
+needing tools or vision skips targets lacking it), automatic `pricesource` price
+resolution (`target.price` override -> `catalog.price_file` -> `models.dev`), optional per-target `translate: true` for explicit `openai` <-> `anthropic`
+chat and streaming SSE translation (same-dialect requests remain a zero-translation
+byte relay), an `llm.invoke` decision through `security/policy` (shadow by default,
+ask refuses until approved), and `llm/core` guard for breaker and cooldown with
+failover before the first byte. Caller identity comes only from the verified
+principal; a `caller_id` in a request is ignored. Auth is `security/auth`: Tether-issued EdDSA JWTs verified offline against a
+cached JWKS (`auth.jwt`), plus static hashed keys. Provider keys are secret
+references, not config: `printf %s "$KEY" | station secret set keychain://openai/work`,
+then `api_key_ref: keychain://openai/work` (`station secret check <ref>` shows
+where it resolves, never the value).
+
+Logging: JSON to stderr through `security/redact` (known secrets are matched
+exactly, credential shapes by rule). One `http` line per request (verified
+principal, route pattern, status, duration, request ID; no query string, header
+or body), one `auth` event per guarded request, one `policy` event per
+`llm.invoke` decision, one `llm.call` line per relayed call (provider, model,
+outcome, tokens, cost) and `llm.refused` for what the gateway turns away.
+Prompts and completions are never written to stderr logs. Flags: `-log-format`, `-log-level`.
+
+Ledger: every call (and every failed-over attempt) is an entry with identity,
+routing, outcome, disjoint usage, price snapshot and cost. `ledger.store: postgres`
+makes it durable: an idempotent, migrated `llm_calls` table in a database and role
+dedicated to it, written off the request path through a bounded queue with retry. If
+the database is down, calls still succeed, entries wait and retry, and a dropped
+entry is counted (`buffer.dropped` in `/v1/usage`) and logged with enough to recover
+it. Setting `ledger.capture.mode: full` passes the leader/system prompt, tool
+definitions, request body and response (or bounded SSE events) through
+`security/redact` `v0.2.0` `Sanitizer` (sharing the resolved-secret `redact.Scope`
+and PII rules, failing closed to an `oversized` tombstone when a payload exceeds
+`ledger.capture.max_bytes`) and stores them in `detail` alongside the redaction
+audit report.
+
+Budgets and local routes: `budgets` uses `llm/core/quota` (`SeededStore` + `Limiter`)
+over `day`, `week`, `month` or rolling windows, scoped by `total` or verified
+`principal` (`max_usd` and/or `max_requests`), seeded from the ledger on startup
+and updated live on every call. Spend math stays in `quota` and passes `budget_state`
+(`ok` or `exhausted`) and `exhausted_budgets` as facts into the `llm.invoke` policy
+decision (`CW-20261010-0030`): shadow mode logs `would_block=true` without changing
+routing, while enforce mode returns `429 budget_exceeded` with `Retry-After` (unless
+a rule such as `budget_state: exhausted, tag: free, effect: allow` permits a free
+local target). Targets carry `tags` (`local`, `free`, `paid`) and `best_effort: true`
+(`CW-20261011-0099`: fast 1.5s header timeout + threshold-1 breaker so a sleeping or
+rebooting tailnet llama host fails over in milliseconds and is skipped while open),
+and `GET /v1/models` exposes `kind`, `reachable`, `tags` and per-target breaker state.
+
+Not yet: gemini native dialect. Tether remains the production gateway while Station's
+gateway is validated in shadow/parallel.
+
+```bash
+OPENAI_API_KEY=... ANTHROPIC_API_KEY=... station serve -config station.yaml -api-config api.yaml
+station validate -config station.yaml -api-config api.yaml
+```
+
 ## Depending on mcp-host
 
-Station requires the single published `github.com/hollis-labs/libs/mcp/plugin-mcp`
-module at the version recorded in `go.mod`. SDK, host, MCP and API projection
-imports are packages in that module; no standalone legacy module or committed
-`replace`/`go.work` is needed. Build with `GOWORK=off` to use the release.
-
-Inprocess plugins run on plugin-host's driver. Station owns the clock's policy:
-`-plugin-state-dir` explicitly selects its data/cache root, the current host
-process issues a random epoch and monotonically increasing generations, and
-`clock-plugin` version `0.1.0` is checked before Load. Clock has no reverse host
-calls and receives an explicit empty grant set. Other inprocess plugins need
-an explicit Station policy; their identity or grants are not guessed from YAML.
-Process-mode echo, GitHub and Atlas transports retain their existing behavior.
+Station depends on the real, published
+[`github.com/hollis-labs/libs/mcp/plugin-mcp/mcp-host`](https://github.com/hollis-labs/libs/tree/main/mcp/plugin-mcp/mcp-host)
+(`mcp/plugin-mcp` `v0.4.0` as of this writing) — no `replace` directive needed. Both repos
+are also listed in `~/dev/hollis-labs/go.work` for convenience when
+developing them together locally; that workspace entry overrides
+resolution to the local checkout, but `go.mod`'s own `require` line is a
+real version, so a build outside this workspace (`GOWORK=off`, or any
+other machine) fetches it from GitHub like any other dependency.
 
 ## Config
 
@@ -96,8 +173,9 @@ nothing Station-specific about the format itself.
 - `cmd/station/main.go` — the whole binary: subcommand dispatch
   (`serve`/`validate`/`list`/`version`), flag parsing, config loading, then
   a single call into `mcphost.Run` for `serve`. Everything host-shaped
-  lives in the library. `plugin_policy.go` supplies Station's clock identity,
-  root and no-authority policy; it does not implement a host lifecycle.
+  lives in the library.
+- `platform/` — plugin platform: hook registry, stock middleware, auth wiring, app-host assembly.
+- `plugins/llm-gateway` — the llm-gateway plugin (imports libs and `platform` only).
 - `plugins/echo-server` — process-mode starter virtual MCP: a real,
   standalone MCP server with one `echo` tool.
 - `plugins/clock-plugin` — inprocess-mode starter virtual MCP: a

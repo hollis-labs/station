@@ -26,6 +26,7 @@ import (
 	"github.com/hollis-labs/libs/mcp/plugin-mcp/mcp-host/config"
 
 	"github.com/hollis-labs/station/internal/secretref"
+	"github.com/hollis-labs/station/platform"
 )
 
 // version is a placeholder until this binary has a real release
@@ -46,11 +47,13 @@ func run(args []string) int {
 		return runValidate(rest)
 	case "list":
 		return runList(rest)
+	case "secret":
+		return runSecret(rest)
 	case "version":
 		fmt.Println("station " + version)
 		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "station: unknown subcommand %q\n\nUsage: station [serve|validate|list|version] [flags]\n", cmd)
+		fmt.Fprintf(os.Stderr, "station: unknown subcommand %q\n\nUsage: station [serve|validate|list|secret|version] [flags]\n", cmd)
 		return 2
 	}
 }
@@ -69,13 +72,26 @@ func splitSubcommand(args []string) (string, []string) {
 func runServe(args []string) int {
 	fs := flag.NewFlagSet("station serve", flag.ContinueOnError)
 	configPath := fs.String("config", "station.yaml", "path to the logical-server config file")
-	pluginStateDir := fs.String("plugin-state-dir", "", "owner-selected data/cache directory for inprocess plugins")
 	httpAddr := fs.String("http-addr", ":8080", "address to serve HTTP-exposed logical servers on, if any are configured")
+	apiConfig := fs.String("api-config", "", "path to the HTTP API config (api.yaml); empty serves MCP logical servers only")
+	stateDir := fs.String("state-dir", defaultStateDir(), "directory for plugin data and cache roots")
+	logFormat := fs.String("log-format", "json", "log format: json or text")
+	logLevel := fs.String("log-level", "info", "minimum log level: debug, info, warn or error")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(*logLevel)); err != nil {
+		fmt.Fprintf(os.Stderr, "station: invalid -log-level %q\n", *logLevel)
+		return 2
+	}
+	logging, err := platform.NewLogging(os.Stderr, *logFormat, level)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "station: logging setup failed")
+		return 1
+	}
+	logger := logging.Logger
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -95,17 +111,42 @@ func runServe(args []string) int {
 		return 1
 	}
 
-	factories, err := clockInitFactories(ctx, cfg, *pluginStateDir)
+	factories, err := initFactories(cfg, *stateDir)
 	if err != nil {
-		logger.Error("station: plugin initialization policy", "err", err)
+		logger.Error("station: failed to prepare plugin initialization", "err", err)
+		return 1
+	}
+	app, err := loadAPIApp(ctx, *apiConfig, logging)
+	if err != nil {
+		logger.Error("station: failed to load API config", "path", *apiConfig, "err", err)
 		return 1
 	}
 
-	if err := mcphost.Run(ctx, cfg, mcphost.Options{Logger: logger, HTTPAddr: *httpAddr, InprocessInitFactories: factories}); err != nil {
-		logger.Error("station: run failed", "err", err)
-		return 1
+	// MCP hosting and the optional HTTP API run side by side; whichever
+	// stops first (error or signal) takes the other down with it.
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	results := make(chan error, 2)
+	go func() {
+		results <- mcphost.Run(runCtx, cfg, mcphost.Options{Logger: logger, HTTPAddr: *httpAddr, InprocessInitFactories: factories})
+	}()
+	pending := 1
+	if app != nil && app.Enabled() {
+		for _, line := range app.Explain() {
+			logger.Info("station: middleware", "chain", line)
+		}
+		pending++
+		go func() { results <- app.Run(runCtx) }()
 	}
-	return 0
+	code := 0
+	for ; pending > 0; pending-- {
+		if err := <-results; err != nil {
+			logger.Error("station: run failed", "err", err)
+			code = 1
+		}
+		cancel()
+	}
+	return code
 }
 
 // runValidate parses and validates a config file without spawning or
@@ -114,6 +155,7 @@ func runServe(args []string) int {
 func runValidate(args []string) int {
 	fs := flag.NewFlagSet("station validate", flag.ContinueOnError)
 	configPath := fs.String("config", "station.yaml", "path to the logical-server config file")
+	apiConfig := fs.String("api-config", "", "also validate the HTTP API config (api.yaml), assembling plugins without listening")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -124,6 +166,18 @@ func runValidate(args []string) int {
 		return 1
 	}
 	fmt.Printf("station: %s: OK, %d logical server(s) configured\n", *configPath, len(cfg.LogicalServers))
+	if *apiConfig != "" {
+		app, err := loadAPIApp(context.Background(), *apiConfig, validateLogging())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "station: %s: invalid: %v\n", *apiConfig, err)
+			return 1
+		}
+		defer app.Close(context.Background()) //nolint:errcheck // releases connections opened while assembling
+		fmt.Printf("station: %s: OK, middleware chain:\n", *apiConfig)
+		for _, line := range app.Explain() {
+			fmt.Println("  " + line)
+		}
+	}
 	return 0
 }
 
