@@ -4,6 +4,32 @@ All notable user-facing changes land here.
 
 ## Unreleased
 
+### Changed
+
+- Moved to the `libs` monorepo: `mcp-host`, `go-mcp`, `plugin-sdk` and
+  `api-projection` now come from `libs/mcp/plugin-mcp` v0.4.0. Inprocess
+  logical servers need a trusted Init factory (protocol 2); `cmd/station`
+  supplies one for the `clock` starter and fails closed for any other.
+- `clock-plugin` acknowledges the capability contract.
+
+### Added
+
+- `platform/`: plugin platform with route, middleware, transport and stop
+  hooks, built on `libs/app/app-host` and `libs/security/auth`.
+- `plugins/llm-gateway`: transparent LLM relay for OpenAI Chat Completions and Anthropic Messages, with capability-aware targets, `llm.invoke` policy, failover and a usage ledger.
+- `serve -api-config` and `validate -api-config`.
+- `auth.jwt`: offline JWT verification against a cached JWKS (Tether-issued tokens).
+- Per-route request body caps (`Route.MaxBodyBytes`).
+- Redacting JSON logging (`security/redact`), request info shared with the access log
+  (verified principal, route pattern), `llm.call` and `llm.refused` events.
+- `station secret set|check <ref>` and `api_key_ref` for provider keys (`security/secrets`).
+- llm-gateway durable ledger: `ledger.store: postgres` (own database and role, migrated
+  `llm_calls`, idempotent entry IDs, async writer with retry and visible drops);
+  `/v1/usage` filters (`principal`, `since`) and buffer stats.
+- llm-gateway JEV: `kind: decision`, `jev` dialect, `POST /v1/systemone`; decision answers kept in the ledger.
+- `App.Close` releases plugin resources for an app that was assembled but not served.
+- llm-gateway: `POST /v1/embeddings`, model `kind`, `llm.invoke` rule field `operation`.
+
 ### Added
 
 - Initial prototype: a thin binary (`cmd/station/main.go`) wrapping

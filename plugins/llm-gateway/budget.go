@@ -1,0 +1,275 @@
+package llmgateway
+
+import (
+	"context"
+	"fmt"
+	"math"
+	"sync"
+	"time"
+
+	"github.com/hollis-labs/libs/llm/core/quota"
+)
+
+const (
+	unitUSDMicros quota.Unit = "usd_micros"
+	unitRequests  quota.Unit = "requests"
+)
+
+// BudgetStatus is the result of checking every configured budget that applies
+// to a call. Spend math and windows live here in the quota module; policy
+// receives this summary as facts on llm.invoke.
+type BudgetStatus struct {
+	// State is "ok" or "exhausted".
+	State string
+	// Exhausted lists the IDs of budgets that refused the call.
+	Exhausted []string
+	// RetryAfter is the longest wait among exhausted budgets.
+	RetryAfter time.Duration
+	// RemainingUSD is the lowest remaining USD budget across matching USD
+	// limits, or nil when no USD budget applies.
+	RemainingUSD *float64
+}
+
+type compiledBudget struct {
+	cfg       BudgetConfig
+	window    quota.Window
+	maxMicros int64
+	maxReqs   int64
+}
+
+func (b compiledBudget) matches(callerID, model string) bool {
+	if b.cfg.Principal != "" && !glob(b.cfg.Principal, callerID) {
+		return false
+	}
+	if b.cfg.Model != "" && !glob(b.cfg.Model, model) {
+		return false
+	}
+	return true
+}
+
+func (b compiledBudget) key(callerID string) string {
+	if b.cfg.Scope == "principal" {
+		if callerID == "" {
+			callerID = "anonymous"
+		}
+		return "budget=" + b.cfg.ID + "/principal=" + callerID
+	}
+	return "budget=" + b.cfg.ID
+}
+
+func (b compiledBudget) usdLimit(callerID string) quota.Limit {
+	return quota.Limit{
+		Key:    b.key(callerID),
+		Unit:   unitUSDMicros,
+		Window: b.window,
+		Max:    b.maxMicros,
+	}
+}
+
+func (b compiledBudget) reqLimit(callerID string) quota.Limit {
+	return quota.Limit{
+		Key:    b.key(callerID),
+		Unit:   unitRequests,
+		Window: b.window,
+		Max:    b.maxReqs,
+	}
+}
+
+// Budgets tracks call counts and USD spend over calendar or rolling windows,
+// seeded from the ledger store so restarts do not reset active windows.
+type Budgets struct {
+	items   []compiledBudget
+	seeded  *quota.SeededStore
+	limiter *quota.Limiter
+
+	mu   sync.Mutex
+	seen map[string]bool
+}
+
+func parseBudgetWindow(raw string) (quota.Window, time.Duration, error) {
+	switch raw {
+	case "", "month":
+		return quota.Calendar(quota.Month, time.UTC), 32 * 24 * time.Hour, nil
+	case "week":
+		return quota.Calendar(quota.Week, time.UTC), 8 * 24 * time.Hour, nil
+	case "day":
+		return quota.Calendar(quota.Day, time.UTC), 2 * 24 * time.Hour, nil
+	default:
+		d, err := time.ParseDuration(raw)
+		if err != nil || d <= 0 {
+			return quota.Window{}, 0, fmt.Errorf("window %q must be day, week, month or a positive duration", raw)
+		}
+		return quota.Rolling(d), d + time.Hour, nil
+	}
+}
+
+func usdToMicros(usd float64) int64 {
+	if usd <= 0 {
+		return 0
+	}
+	m := int64(math.Round(usd * 1e6))
+	if m == 0 {
+		return 1
+	}
+	return m
+}
+
+// NewBudgets compiles cfg and binds a quota.Limiter backed by a SeededStore
+// that reads historical entries from store on first check.
+func NewBudgets(cfgs []BudgetConfig, store Store, clock quota.Clock) (*Budgets, error) {
+	if clock == nil {
+		clock = quota.ClockFunc(func() time.Time { return time.Now().UTC() })
+	}
+	var (
+		items   []compiledBudget
+		horizon = 24 * time.Hour
+	)
+	for _, c := range cfgs {
+		w, h, err := parseBudgetWindow(c.Window)
+		if err != nil {
+			return nil, fmt.Errorf("llm-gateway: budget %q: %w", c.ID, err)
+		}
+		if h > horizon {
+			horizon = h
+		}
+		items = append(items, compiledBudget{
+			cfg:       c,
+			window:    w,
+			maxMicros: usdToMicros(c.MaxUSD),
+			maxReqs:   c.MaxRequests,
+		})
+	}
+	b := &Budgets{
+		items: items,
+		seen:  map[string]bool{},
+	}
+	seedFn := func(ctx context.Context, since time.Time) ([]quota.SeedEntry, error) {
+		if store == nil || len(b.items) == 0 {
+			return nil, nil
+		}
+		entries, err := store.Recent(ctx, Query{Since: since})
+		if err != nil {
+			return nil, err
+		}
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		var out []quota.SeedEntry
+		for _, e := range entries {
+			if e.ID != "" && b.seen[e.ID] {
+				continue
+			}
+			if e.ID != "" {
+				b.seen[e.ID] = true
+			}
+			out = append(out, b.entriesFor(e)...)
+		}
+		return out, nil
+	}
+	b.seeded = quota.NewSeededStore(seedFn, horizon, clock)
+	b.limiter = quota.New(b.seeded, quota.WithClock(clock))
+	return b, nil
+}
+
+func (b *Budgets) entriesFor(e Entry) []quota.SeedEntry {
+	if e.Outcome != OutcomeOK {
+		return nil
+	}
+	callerID := e.Row.SessionID
+	if callerID == "" {
+		callerID = "anonymous"
+	}
+	at := e.Row.RecordedAt
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	var out []quota.SeedEntry
+	for _, item := range b.items {
+		if !item.matches(callerID, e.Alias) {
+			continue
+		}
+		if item.maxMicros > 0 && e.CostUSD != nil && *e.CostUSD > 0 {
+			out = append(out, quota.SeedEntry{
+				Counter: item.usdLimit(callerID).Counter(),
+				Entry:   quota.Entry{At: at, Amount: usdToMicros(*e.CostUSD)},
+			})
+		}
+		if item.maxReqs > 0 {
+			out = append(out, quota.SeedEntry{
+				Counter: item.reqLimit(callerID).Counter(),
+				Entry:   quota.Entry{At: at, Amount: 1},
+			})
+		}
+	}
+	return out
+}
+
+// Record updates in-memory budget counters immediately when a call finishes so
+// subsequent checks see the spend without waiting for async store flushes.
+func (b *Budgets) Record(e Entry) {
+	if b == nil || len(b.items) == 0 || e.Outcome != OutcomeOK {
+		return
+	}
+	b.mu.Lock()
+	if e.ID != "" {
+		if b.seen[e.ID] {
+			b.mu.Unlock()
+			return
+		}
+		b.seen[e.ID] = true
+	}
+	seeds := b.entriesFor(e)
+	b.mu.Unlock()
+
+	ctx := context.Background()
+	for _, s := range seeds {
+		_ = b.seeded.Record(ctx, s.Counter, s.Entry)
+	}
+}
+
+// Check evaluates all budgets matching caller and model, returning the
+// combined budget_state facts for policy admission.
+func (b *Budgets) Check(ctx context.Context, caller Caller, model string) BudgetStatus {
+	status := BudgetStatus{State: "ok"}
+	if b == nil || len(b.items) == 0 {
+		return status
+	}
+	callerID := caller.ID
+	if !caller.Known || callerID == "" {
+		callerID = "anonymous"
+	}
+	for _, item := range b.items {
+		if !item.matches(callerID, model) {
+			continue
+		}
+		exhausted := false
+		if item.maxMicros > 0 {
+			dec, err := b.limiter.Check(ctx, item.usdLimit(callerID), 1)
+			if err == nil {
+				remUSD := float64(dec.Remaining) / 1e6
+				if status.RemainingUSD == nil || remUSD < *status.RemainingUSD {
+					status.RemainingUSD = &remUSD
+				}
+				if !dec.Allowed {
+					exhausted = true
+					if dec.RetryAfter > status.RetryAfter {
+						status.RetryAfter = dec.RetryAfter
+					}
+				}
+			}
+		}
+		if item.maxReqs > 0 {
+			dec, err := b.limiter.Check(ctx, item.reqLimit(callerID), 1)
+			if err == nil && !dec.Allowed {
+				exhausted = true
+				if dec.RetryAfter > status.RetryAfter {
+					status.RetryAfter = dec.RetryAfter
+				}
+			}
+		}
+		if exhausted {
+			status.State = "exhausted"
+			status.Exhausted = append(status.Exhausted, item.cfg.ID)
+		}
+	}
+	return status
+}

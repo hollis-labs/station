@@ -1,15 +1,6 @@
-// Command station is a prototype built on github.com/hollis-labs/libs/mcp/plugin-mcp/mcp-host:
-// two starter virtual MCPs (an echo server and a clock plugin, one per
-// transport mode) proving the host library is feature-complete enough to
-// build a real product on. See ../../station.yaml for the config and
-// ../../README.md for how to run it.
-//
-// MCP is the only agent-facing surface — matching Tangent's own
-// convention (see AGENTS.md's "Service layer" section). This CLI is an
-// operator/ops surface: bare invocation serves (unchanged from before
-// this file had subcommands at all), and validate/list/version are
-// inspection tools an agent can run before touching anything live, not
-// a second agent-facing API.
+// Command station hosts MCP logical servers and opt-in HTTP plugin APIs.
+// Use -api-only with -api-config for an HTTP service without MCP processes.
+// CLI subcommands are the operator surface; Station has no management API.
 package main
 
 import (
@@ -26,6 +17,7 @@ import (
 	"github.com/hollis-labs/libs/mcp/plugin-mcp/mcp-host/config"
 
 	"github.com/hollis-labs/station/internal/secretref"
+	"github.com/hollis-labs/station/platform"
 )
 
 // version is a placeholder until this binary has a real release
@@ -46,11 +38,15 @@ func run(args []string) int {
 		return runValidate(rest)
 	case "list":
 		return runList(rest)
+	case "secret":
+		return runSecret(rest)
+	case "client":
+		return runClient(rest)
 	case "version":
 		fmt.Println("station " + version)
 		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "station: unknown subcommand %q\n\nUsage: station [serve|validate|list|version] [flags]\n", cmd)
+		fmt.Fprintf(os.Stderr, "station: unknown subcommand %q\n\nUsage: station [serve|validate|list|secret|client|version] [flags]\n", cmd)
 		return 2
 	}
 }
@@ -69,15 +65,29 @@ func splitSubcommand(args []string) (string, []string) {
 func runServe(args []string) int {
 	fs := flag.NewFlagSet("station serve", flag.ContinueOnError)
 	configPath := fs.String("config", "station.yaml", "path to the logical-server config file")
-	pluginStateDir := fs.String("plugin-state-dir", "", "owner-selected data/cache directory for inprocess plugins")
 	httpAddr := fs.String("http-addr", ":8080", "address to serve HTTP-exposed logical servers on, if any are configured")
+	apiConfig := fs.String("api-config", "", "path to the HTTP API config (api.yaml); empty serves MCP logical servers only")
+	apiOnly := fs.Bool("api-only", false, "serve only the HTTP API; requires -api-config and does not load MCP configuration")
+	stateDir := fs.String("state-dir", defaultStateDir(), "directory for plugin data and cache roots")
+	logFormat := fs.String("log-format", "json", "log format: json or text")
+	logLevel := fs.String("log-level", "info", "minimum log level: debug, info, warn or error")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(*logLevel)); err != nil {
+		fmt.Fprintf(os.Stderr, "station: invalid -log-level %q\n", *logLevel)
+		return 2
+	}
+	logging, err := platform.NewLogging(os.Stderr, *logFormat, level)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "station: logging setup failed")
+		return 1
+	}
+	logger := logging.Logger
 
-	cfg, err := config.Load(*configPath)
+	cfg, err := loadMCPConfig(*configPath, *apiConfig, *apiOnly)
 	if err != nil {
 		logger.Error("station: failed to load config", "path", *configPath, "err", err)
 		return 1
@@ -90,41 +100,112 @@ func runServe(args []string) int {
 	// process-mode logical server's env before spawning it — see
 	// internal/secretref. A logical server with no reference-valued env
 	// entries is unaffected.
-	if err := secretref.Resolve(ctx, cfg); err != nil {
-		logger.Error("station: failed to resolve credential references", "err", err)
-		return 1
+	if cfg != nil {
+		if err := secretref.Resolve(ctx, cfg); err != nil {
+			logger.Error("station: failed to resolve credential references", "err", err)
+			return 1
+		}
 	}
 
-	factories, err := clockInitFactories(ctx, cfg, *pluginStateDir)
+	factories, err := initFactories(cfg, *stateDir)
 	if err != nil {
-		logger.Error("station: plugin initialization policy", "err", err)
+		logger.Error("station: failed to prepare plugin initialization", "err", err)
 		return 1
+	}
+	app, err := loadAPIApp(ctx, *apiConfig, logging)
+	if err != nil {
+		logger.Error("station: failed to load API config", "path", *apiConfig, "err", err)
+		return 1
+	}
+	if *apiOnly {
+		if app == nil || !app.Enabled() {
+			if app != nil {
+				_ = app.Close(ctx)
+			}
+			logger.Error("station: -api-only requires an API listen address")
+			return 1
+		}
+		if err := app.Run(ctx); err != nil {
+			logger.Error("station: API failed", "err", err)
+			return 1
+		}
+		return 0
 	}
 
-	if err := mcphost.Run(ctx, cfg, mcphost.Options{Logger: logger, HTTPAddr: *httpAddr, InprocessInitFactories: factories}); err != nil {
-		logger.Error("station: run failed", "err", err)
-		return 1
+	// MCP hosting and the optional HTTP API run side by side; whichever
+	// stops first (error or signal) takes the other down with it.
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	results := make(chan error, 2)
+	go func() {
+		results <- mcphost.Run(runCtx, cfg, mcphost.Options{Logger: logger, HTTPAddr: *httpAddr, InprocessInitFactories: factories})
+	}()
+	pending := 1
+	if app != nil && app.Enabled() {
+		for _, line := range app.Explain() {
+			logger.Info("station: middleware", "chain", line)
+		}
+		pending++
+		go func() { results <- app.Run(runCtx) }()
 	}
-	return 0
+	code := 0
+	for ; pending > 0; pending-- {
+		if err := <-results; err != nil {
+			logger.Error("station: run failed", "err", err)
+			code = 1
+		}
+		cancel()
+	}
+	return code
 }
 
-// runValidate parses and validates a config file without spawning or
-// dialing anything — safe for an agent to run before touching a live
-// station process.
+// runValidate checks configuration without listening or spawning MCP servers.
+// API validation assembles plugins: it may resolve secrets, contact metadata
+// services, and connect/migrate the configured ledger.
 func runValidate(args []string) int {
 	fs := flag.NewFlagSet("station validate", flag.ContinueOnError)
 	configPath := fs.String("config", "station.yaml", "path to the logical-server config file")
+	apiConfig := fs.String("api-config", "", "also validate the HTTP API config (api.yaml), assembling plugins without listening")
+	apiOnly := fs.Bool("api-only", false, "validate only the HTTP API configuration")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	cfg, err := config.Load(*configPath)
+	cfg, err := loadMCPConfig(*configPath, *apiConfig, *apiOnly)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "station: %s: invalid: %v\n", *configPath, err)
 		return 1
 	}
-	fmt.Printf("station: %s: OK, %d logical server(s) configured\n", *configPath, len(cfg.LogicalServers))
+	if cfg != nil {
+		fmt.Printf("station: %s: OK, %d logical server(s) configured\n", *configPath, len(cfg.LogicalServers))
+	}
+	if *apiConfig != "" {
+		app, err := loadAPIApp(context.Background(), *apiConfig, validateLogging())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "station: %s: invalid: %v\n", *apiConfig, err)
+			return 1
+		}
+		defer app.Close(context.Background()) //nolint:errcheck // releases connections opened while assembling
+		if *apiOnly && !app.Enabled() {
+			fmt.Fprintln(os.Stderr, "station: -api-only requires an API listen address")
+			return 1
+		}
+		fmt.Printf("station: %s: OK, middleware chain:\n", *apiConfig)
+		for _, line := range app.Explain() {
+			fmt.Println("  " + line)
+		}
+	}
 	return 0
+}
+
+func loadMCPConfig(path, apiPath string, apiOnly bool) (*config.Config, error) {
+	if apiOnly {
+		if apiPath == "" {
+			return nil, fmt.Errorf("-api-only requires -api-config")
+		}
+		return nil, nil
+	}
+	return config.Load(path)
 }
 
 // runList prints every configured logical server without spawning or

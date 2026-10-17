@@ -20,6 +20,7 @@ import (
 	"time"
 
 	plugin "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk"
+	capability "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/capability"
 	sdksub "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/subprocess"
 )
 
@@ -30,7 +31,7 @@ func (clockPlugin) Init(ctx context.Context, params sdksub.InitParams) (sdksub.I
 		ID: "clock-plugin", Name: "Clock Plugin", Version: "0.1.0",
 		Description:        "Reports the current time.",
 		Protocol:           sdksub.ProtocolVersion,
-		CapabilityContract: 1,
+		CapabilityContract: capability.ContractVersion,
 	}, nil
 }
 

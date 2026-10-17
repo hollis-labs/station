@@ -33,8 +33,8 @@ go vet ./...
 go test -race -count=1 ./...
 ```
 
-The Go workflow runs these checks and the real-child tests on Linux. There is
-no Makefile.
+There is no CI workflow and no Makefile in this repo, so these are the only
+gate (same convention as `mcp-host` and `go-mcp`).
 
 `go test ./...` builds the real `station` binary and both real plugin
 binaries via `go build`, then drives them as subprocesses with a genuine
@@ -44,12 +44,13 @@ flake.
 
 ## Boundaries
 
-`go.mod` requires the published `github.com/hollis-labs/libs/mcp/plugin-mcp`
-module. All SDK/MCP/host imports use its package roots. No committed `replace`
-or `go.work`; final consumer gates use the actual published release. Clock's
-explicit owner policy is in `cmd/station/plugin_policy.go`; plugin-host owns
-inprocess subprocess lifecycle, protocol and grants validation. Do not duplicate
-its supervisor or wire codec here. `-plugin-state-dir` is required for clock.
+`go.mod` requires the real, published `github.com/hollis-labs/libs/mcp/plugin-mcp/mcp-host`
+(`mcp/plugin-mcp` `v0.4.0`) — no `replace` directive. There is no tracked or ambient
+`go.work`; both `mcp-host` and this repo now have real tags, so cross-module
+development against an unreleased `mcp-host` change is a throwaway
+`go.work` outside the repos, never a
+`replace`, never a tracked workspace file. Bumping the `mcp-host` version
+here should follow a real tag on that repo, not a local, untagged change.
 
 MCP is the only agent-facing interface. `cmd/station`'s
 `validate`/`list`/`version` subcommands are an ops/inspection surface, not

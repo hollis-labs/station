@@ -36,3 +36,10 @@ agentrc.yml
 AUDIT_RESULTS.md
 .lefthook.yml
 lefthook.yml
+
+# Cerberus serializes local builds with this lock
+/.cerberus-build.lock
+
+# Python verification tools
+__pycache__/
+*.pyc

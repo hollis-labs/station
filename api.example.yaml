@@ -1,0 +1,103 @@
+# Example HTTP API config for `station serve -api-config api.yaml`.
+# API-only: station serve -api-only -api-config api.yaml
+# Everything here is opt-in: without -api-config Station only hosts MCP
+# logical servers. Bind to loopback unless something in front terminates TLS.
+listen: 127.0.0.1:8081
+max_body_bytes: 4194304
+
+auth:
+  mode: enforce            # off | permissive | enforce (default enforce)
+  # Tokens issued by Tether, verified offline against a cached JWKS. The
+  # audience must be exactly this app's id; scopes come from the token.
+  jwt:
+    issuer: tether
+    audience: station
+    jwks_url: https://tether.example.invalid/.well-known/jwks.json
+    bootstrap_key_file: ./issuer.pem       # used until the first JWKS fetch succeeds
+  # Prefer a separately managed registry for app credentials:
+  # keys_file: /absolute/path/to/clients.yaml
+  # station client issue -keys-file PATH -id APP -output PRIVATE_TOKEN_FILE
+  # Reload after issuing/revoking; only hashes are stored in the registry.
+  # Static keys remain for scripts and bootstrapping.
+  keys:
+    # Store only the SHA-256 of a key:  printf %s "$KEY" | sha256sum
+    - id: local-dev
+      sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+      scopes: ["llm-gateway.*"]
+
+# A plugin runs only when its block exists here.
+plugins:
+  llm-gateway:
+    providers:
+      # dialect is the provider's native wire protocol; requests are relayed to
+      # a provider speaking the same dialect as the endpoint they arrived on.
+      - id: openai
+        dialect: openai                  # openai | anthropic
+        base_url: https://api.openai.com/v1
+        # Provision with:  printf %s "$KEY" | station secret set keychain://openai/work
+        api_key_ref: keychain://openai/work   # or api_key_env: OPENAI_API_KEY
+        timeout_seconds: 120             # time to first response header
+      - id: jev                          # a System-1 decision model is an LLM like the others
+        dialect: jev
+        base_url: https://api.typesafe.ai/v1
+        api_key_ref: keychain://jev/prod
+      - id: anthropic
+        dialect: anthropic
+        base_url: https://api.anthropic.com/v1
+        api_key_env: ANTHROPIC_API_KEY
+    models:
+      - name: fast                       # what callers send as "model"
+        targets:                         # tried in order
+          - provider: openai
+            model: gpt-4o-mini
+            operations: [chat]          # narrow to the endpoints verified for this model
+            tags: [local, free]          # or [paid, cloud]; surfaced on GET /v1/models and matched by policy
+            best_effort: true            # short 1.5s header timeout + threshold-1 breaker for sleeping local hosts
+            price: {input_per_million: 0.15, output_per_million: 0.60, cache_read_per_million: 0.075}
+      - name: embed                      # kind: embedding is served by POST /v1/embeddings
+        kind: embedding
+        targets:
+          - provider: openai
+            model: text-embedding-3-small
+            price: {input_per_million: 0.02}
+      - name: judge                      # kind: decision is served by POST /v1/systemone
+        kind: decision
+        targets:
+          - provider: jev
+            model: jev-v4
+      - name: claude-sonnet
+        targets:
+          - provider: anthropic
+            model: claude-sonnet-4-5
+            translate: false             # set true to opt in to OpenAI <-> Anthropic cross-protocol translation
+            tags: [paid, cloud]
+            capabilities: {vision: true}   # mark false to skip this target for image requests
+    catalog:
+      ttl: 90s                           # default 90s cache/refresh TTL for models.dev metadata & pricing
+      warmup: true                       # fetch metadata before listening; fail startup if unavailable
+      refresh: true                      # keep models.dev catalog fresh in the background
+      # cache_dir: ~/.cache/go-modelsdev
+      # price_file: ./custom-prices.json # optional pricesource JSON table layered ahead of models.dev
+    budgets:
+      - id: caller-daily
+        scope: principal                 # total | principal (keyed on verified caller identity)
+        window: day                      # day | week | month | rolling duration ("1h", "24h")
+        max_usd: 5.00
+      - id: total-monthly
+        scope: total
+        window: month
+        max_usd: 250.00
+    ledger:
+      store: postgres                    # memory (default) is lost on restart
+      postgres:
+        dsn_ref: keychain://station/ledger-dsn   # a database and role dedicated to the ledger
+      capture:
+        mode: full                       # off (default) | full (sanitizes leader, tools, request & response/SSE via security/redact)
+        max_bytes: 262144                # fail-closed tombstone above this size
+    max_body_bytes: 33554432             # this plugin's routes; the API-wide default stays 4 MiB
+    policy:
+      mode: shadow                       # shadow first; switch to enforce once the audit log looks right
+      default_effect: allow
+      rules:
+        - {id: allow-free-over-budget, budget_state: exhausted, tag: free, effect: allow, reason: free local targets remain available when paid budget is exhausted}
+        - {id: no-ci-premium, principal: "ci-*", model: "claude-*", effect: deny, reason: premium models are off limits to CI}
