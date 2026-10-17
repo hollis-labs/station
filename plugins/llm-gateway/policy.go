@@ -14,12 +14,14 @@ import (
 
 // Caller is the verified identity behind a request. It is built only from the
 // principal Station's auth guard stamped on the request context. Nothing the
-// client puts in a header or body (a caller_id, a session label) is read, so
-// an attribution can never be self-asserted.
+// client puts in a header or body can change ID, Kind or Known. A session
+// label is namespaced to that identity for correlation only.
 type Caller struct {
 	ID    string
 	Kind  string
 	Known bool // false when no principal was stamped (auth off or permissive)
+	// ConversationID is namespaced to ID; it grants no authority.
+	ConversationID string
 }
 
 func (c Caller) principal() policy.Principal {

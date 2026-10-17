@@ -36,15 +36,16 @@ or at `http://localhost:8080/clock` for `clock`'s.
 
 ## Service layer
 
-**MCP is the only agent-facing interface** — matching Tangent's own
-convention (verified against its source and docs; see `AGENTS.md`). The
-CLI is an operator/ops surface, not a second agent API:
+Station exposes MCP logical servers and opt-in HTTP plugin APIs. The LLM
+gateway serves API-powered agents and tools directly, with no MCP dependency.
+The CLI is the operator/ops surface:
 
 - `station` / `station serve` — the daemon; bare invocation defaults to
   this, matching Tangent's "no serve subcommand, bare invocation just
   serves" pattern.
-- `station validate [-config PATH]` — parse and validate a config file,
-  no side effects. Exit 0/1.
+- `station validate [-config PATH]` — validate MCP configuration without
+  spawning processes. API validation also assembles plugins and can resolve
+  secrets, fetch metadata, and connect/migrate the ledger. Exit 0/1.
 - `station list [-config PATH]` — print every configured logical server:
   id, name, transport, and (for `inprocess`) its manifest-declared tool
   names, without spawning or dialing anything.
@@ -66,6 +67,13 @@ first-party plugins that are not Station's own starters. Build it there and add
 it to `station.yaml` as a process-mode logical server; its README has the
 config, including the exposure note (Atlas holds `visibility:private` records:
 use loopback or `bearer_tokens`).
+
+## Local HTTP gateway dogfooding
+
+Use `station serve -api-only -api-config /absolute/path/to/api.yaml` to run
+only the HTTP API. No MCP config, demo server, or MCP listener is loaded.
+See [the adoption guide](docs/llm-gateway-adoption.md) for the local endpoint,
+per-app credentials, conversation headers, native API families, and live probes.
 
 ## Plugin platform and the LLM gateway
 

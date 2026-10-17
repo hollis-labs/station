@@ -411,3 +411,26 @@ func TestLedgerConfigValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPGConversationSurvivesRestart(t *testing.T) {
+	dsn := pgDSN(t)
+	s, err := openPGStore(context.Background(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := NewLedger(s, quiet)
+	l.Add(Record{Caller: Caller{ID: "session-test-app", Known: true, ConversationID: "station-session-proof"}, RequestID: "session-proof", Target: &target{provider: &provider{id: "test"}, model: "test"}, Outcome: OutcomeOK})
+	l.Close()
+	s, err = openPGStore(context.Background(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	entries, err := s.Recent(context.Background(), Query{Principal: "session-test-app"})
+	if err != nil || len(entries) == 0 {
+		t.Fatal("missing persisted conversation", err)
+	}
+	if entries[len(entries)-1].ConversationID != "station-session-proof" {
+		t.Fatal("conversation lost on restart")
+	}
+}

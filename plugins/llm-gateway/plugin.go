@@ -17,11 +17,12 @@ import (
 // Scopes the plugin's routes require. A caller key holding "llm-gateway.*"
 // holds all three.
 const (
-	ScopeChat      = "llm-gateway.chat"
-	ScopeEmbed     = "llm-gateway.embed"
-	ScopeDecide    = "llm-gateway.decide"
-	ScopeModelRead = "llm-gateway.models.read"
-	ScopeUsageRead = "llm-gateway.usage.read"
+	ScopeChat         = "llm-gateway.chat"
+	ScopeEmbed        = "llm-gateway.embed"
+	ScopeDecide       = "llm-gateway.decide"
+	ScopeModelRead    = "llm-gateway.models.read"
+	ScopeUsageRead    = "llm-gateway.usage.read"
+	ScopeCatalogWrite = "llm-gateway.catalog.write"
 )
 
 // Plugin is the llm-gateway platform plugin.
@@ -65,7 +66,7 @@ func (p *Plugin) Register(ctx context.Context, reg *platform.PluginRegistry, dec
 		}
 		prov := &provider{
 			id: pc.ID, catalogProvider: pc.CatalogProvider, dialect: dialects[pc.Dialect],
-			baseURL: normalizeBaseURL(pc.BaseURL), headers: pc.Headers,
+			baseURL: normalizeBaseURL(pc.BaseURL), headers: pc.Headers, opencodeSession: pc.OpenCodeSession,
 			apiKey: key, client: upstreamClient(p.transport, pc.timeout()),
 		}
 		providers[pc.ID] = prov
@@ -94,6 +95,15 @@ func (p *Plugin) Register(ctx context.Context, reg *platform.PluginRegistry, dec
 			return err
 		}
 		gw.SetCatalog(cat)
+	}
+	if cfg.Catalog.Warmup {
+		warmCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := gw.Catalog().Refresh(warmCtx)
+		cancel()
+		if err != nil {
+			ledger.Close()
+			return fmt.Errorf("llm-gateway: catalog warmup: %w", err)
+		}
 	}
 	if cfg.Catalog.shouldRefresh() && gw.Catalog() != nil {
 		rctx, cancel := context.WithCancel(context.Background())
@@ -144,7 +154,7 @@ func (p *Plugin) Register(ctx context.Context, reg *platform.PluginRegistry, dec
 		{Method: "POST", Path: "/v1/systemone", Scope: ScopeDecide, MaxBodyBytes: max, Handler: gw.Handler(jevDialect{}, OpDecide)},
 		{Method: "GET", Path: "/v1/models", Scope: ScopeModelRead, Handler: gw.ModelsHandler()},
 		{Method: "GET", Path: "/v1/catalog", Scope: ScopeModelRead, Handler: gw.CatalogHandler()},
-		{Method: "POST", Path: "/v1/catalog/refresh", Scope: ScopeModelRead, Handler: gw.CatalogRefreshHandler()},
+		{Method: "POST", Path: "/v1/catalog/refresh", Scope: ScopeCatalogWrite, Handler: gw.CatalogRefreshHandler()},
 		{Method: "GET", Path: "/v1/usage", Scope: ScopeUsageRead, Handler: gw.UsageHandler()},
 	} {
 		if err := reg.Mount(rt); err != nil {
@@ -326,4 +336,3 @@ func applyModelDiscovery(ctx context.Context, models []ModelConfig, p *provider,
 	}
 	return out
 }
-

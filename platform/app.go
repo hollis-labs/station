@@ -40,6 +40,9 @@ type AuthConfig struct {
 	Mode string `yaml:"mode"`
 	// Keys are static API keys, stored as SHA-256 hex only.
 	Keys []KeyConfig `yaml:"keys"`
+	// KeysFile is an absolute path to a separate YAML list of hashed client keys.
+	// Changes take effect after a service reload; the raw credentials never live here.
+	KeysFile string `yaml:"keys_file"`
 	// JWT, when set, accepts EdDSA JWTs from an issuer (Tether issues them),
 	// verified offline against a cached JWKS. Tried before static keys.
 	JWT *JWTConfig `yaml:"jwt"`
@@ -241,8 +244,19 @@ func buildGuard(cfg *Config, reg *Registry, logger *slog.Logger) (*auth.Guard, *
 	if err != nil {
 		return nil, nil, fmt.Errorf("platform: auth.mode: %w", err)
 	}
-	keys := make([]auth.APIKey, 0, len(cfg.Auth.Keys))
-	for _, k := range cfg.Auth.Keys {
+	configuredKeys := append([]KeyConfig(nil), cfg.Auth.Keys...)
+	if cfg.Auth.KeysFile != "" {
+		loaded, err := LoadClientKeys(cfg.Auth.KeysFile)
+		if err != nil {
+			return nil, nil, err
+		}
+		configuredKeys = append(configuredKeys, loaded...)
+	}
+	if err := ValidateClientKeys(configuredKeys); err != nil {
+		return nil, nil, err
+	}
+	keys := make([]auth.APIKey, 0, len(configuredKeys))
+	for _, k := range configuredKeys {
 		if k.ID == "" || !sha256Hex.MatchString(k.SHA256) {
 			return nil, nil, fmt.Errorf("platform: auth key %q needs an id and a lower-case sha256 hex digest", k.ID)
 		}
@@ -268,17 +282,15 @@ func buildGuard(cfg *Config, reg *Registry, logger *slog.Logger) (*auth.Guard, *
 	g, err := auth.New(auth.Config{
 		Mode:     mode,
 		Verifier: verifier,
-		OnRequest: func(r *http.Request, p auth.Principal, _ auth.Event) {
+		OnRequest: func(r *http.Request, p auth.Principal, ev auth.Event) {
 			if ri := infoOf(r.Context()); ri != nil {
 				ri.SetPrincipal(p.ID, p.Verified)
 			}
+			logger.Info("auth", "request_id", RequestID(r), "mode", string(ev.Mode), "authn", ev.Authentication, "route", ev.Route,
+				"principal", ev.PrincipalID, "scope", ev.RequiredScope, "denied", ev.Denied, "would_deny", ev.WouldDeny, "reason", ev.Reason)
 		},
 		Scopes: table,
 		Logger: logger,
-		Audit: func(ev auth.Event) {
-			logger.Info("auth", "mode", string(ev.Mode), "authn", ev.Authentication, "route", ev.Route,
-				"principal", ev.PrincipalID, "scope", ev.RequiredScope, "denied", ev.Denied, "would_deny", ev.WouldDeny, "reason", ev.Reason)
-		},
 	})
 	if err != nil {
 		return nil, nil, err

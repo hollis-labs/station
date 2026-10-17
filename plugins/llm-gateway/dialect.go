@@ -84,6 +84,7 @@ type ModelInfo struct {
 // TargetInfo describes one target behind a model alias, its breaker state, and
 // its resolved capabilities, pricing, limits, modalities, and metadata.
 type TargetInfo struct {
+	Operations   []Operation                `json:"operations,omitempty"`
 	Provider     string                     `json:"provider"`
 	Model        string                     `json:"model"`
 	Dialect      string                     `json:"dialect"`

@@ -45,16 +45,17 @@ type Record struct {
 type Entry struct {
 	// ID is unique per entry (not per request: a failed-over request has one
 	// entry per attempt). Durable stores use it to make a retried write a no-op.
-	ID        string          `json:"id"`
-	Row       usageledger.Row `json:"row"`
-	Alias     string          `json:"alias"`
-	Operation Operation       `json:"operation"`
-	Dialect   string          `json:"dialect"`
-	RequestID string          `json:"request_id,omitempty"`
-	Status    int             `json:"status"`
-	Outcome   string          `json:"outcome"`
-	Streamed  bool            `json:"streamed"`
-	LatencyMS int64           `json:"latency_ms"`
+	ID             string          `json:"id"`
+	Row            usageledger.Row `json:"row"`
+	Alias          string          `json:"alias"`
+	Operation      Operation       `json:"operation"`
+	Dialect        string          `json:"dialect"`
+	RequestID      string          `json:"request_id,omitempty"`
+	ConversationID string          `json:"conversation_id,omitempty"`
+	Status         int             `json:"status"`
+	Outcome        string          `json:"outcome"`
+	Streamed       bool            `json:"streamed"`
+	LatencyMS      int64           `json:"latency_ms"`
 	// Verified is false when the caller was not authenticated (auth off).
 	Verified bool `json:"verified"`
 	// CostUSD is nil when the target has no configured price or the upstream
@@ -152,7 +153,7 @@ func (l *Ledger) Add(rec Record) Entry {
 	if row.SessionID == "" {
 		row.SessionID = "anonymous"
 	}
-	e := Entry{ID: newEntryID(), Alias: rec.Alias, Operation: rec.Operation, Dialect: rec.Dialect, RequestID: rec.RequestID,
+	e := Entry{ID: newEntryID(), Alias: rec.Alias, Operation: rec.Operation, Dialect: rec.Dialect, RequestID: rec.RequestID, ConversationID: rec.Caller.ConversationID,
 		Status: rec.Status, Outcome: rec.Outcome, Streamed: rec.Streamed, LatencyMS: rec.Latency.Milliseconds(),
 		Verified: rec.Caller.Known, Detail: rec.Detail}
 	if price != nil && rec.Usage != nil {
@@ -180,6 +181,7 @@ func (l *Ledger) log(e Entry) {
 	u := e.Row.Usage
 	attrs := []any{
 		"entry_id", e.ID, "request_id", e.RequestID, "principal", e.Row.SessionID, "verified", e.Verified,
+		"conversation_id", e.ConversationID,
 		"operation", string(e.Operation), "dialect", e.Dialect, "alias", e.Alias,
 		"provider", e.Row.Provider, "model", e.Row.Model, "status", e.Status, "outcome", e.Outcome,
 		"streamed", e.Streamed, "latency_ms", e.LatencyMS,

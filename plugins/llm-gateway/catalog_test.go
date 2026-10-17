@@ -1,6 +1,7 @@
 package llmgateway
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -143,7 +144,8 @@ func TestCatalogCentralizesModelsDevMetadataCapabilitiesAndPricing(t *testing.T)
       ttl: 90s
       cache_dir: %q
       url: %q
-      refresh: true`, cacheDir, mdSrv.URL)
+      refresh: true
+      warmup: true`, cacheDir, mdSrv.URL)
 
 	// Make o1 fail with 503 so gpt fails over to o2 (gpt-backup), which has NO
 	// explicit price in api.yaml and relies on models.dev for pricing!
@@ -366,6 +368,7 @@ plugins:
       cache_dir: %q
       url: %q
       refresh: true
+      warmup: true
     providers:
       - id: opencode-zen
         dialect: openai
@@ -388,6 +391,7 @@ plugins:
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = app.Close(context.Background()) })
 	srv := httptest.NewServer(app.Handler())
 	t.Cleanup(srv.Close)
 
@@ -422,4 +426,3 @@ plugins:
 		t.Fatalf("normalizeBaseURL(opencode.ai/zen/go/) = %q", got)
 	}
 }
-

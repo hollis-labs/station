@@ -1,4 +1,5 @@
 # Example HTTP API config for `station serve -api-config api.yaml`.
+# API-only: station serve -api-only -api-config api.yaml
 # Everything here is opt-in: without -api-config Station only hosts MCP
 # logical servers. Bind to loopback unless something in front terminates TLS.
 listen: 127.0.0.1:8081
@@ -13,6 +14,10 @@ auth:
     audience: station
     jwks_url: https://tether.example.invalid/.well-known/jwks.json
     bootstrap_key_file: ./issuer.pem       # used until the first JWKS fetch succeeds
+  # Prefer a separately managed registry for app credentials:
+  # keys_file: /absolute/path/to/clients.yaml
+  # station client issue -keys-file PATH -id APP -output PRIVATE_TOKEN_FILE
+  # Reload after issuing/revoking; only hashes are stored in the registry.
   # Static keys remain for scripts and bootstrapping.
   keys:
     # Store only the SHA-256 of a key:  printf %s "$KEY" | sha256sum
@@ -45,6 +50,7 @@ plugins:
         targets:                         # tried in order
           - provider: openai
             model: gpt-4o-mini
+            operations: [chat]          # narrow to the endpoints verified for this model
             tags: [local, free]          # or [paid, cloud]; surfaced on GET /v1/models and matched by policy
             best_effort: true            # short 1.5s header timeout + threshold-1 breaker for sleeping local hosts
             price: {input_per_million: 0.15, output_per_million: 0.60, cache_read_per_million: 0.075}
@@ -68,6 +74,7 @@ plugins:
             capabilities: {vision: true}   # mark false to skip this target for image requests
     catalog:
       ttl: 90s                           # default 90s cache/refresh TTL for models.dev metadata & pricing
+      warmup: true                       # fetch metadata before listening; fail startup if unavailable
       refresh: true                      # keep models.dev catalog fresh in the background
       # cache_dir: ~/.cache/go-modelsdev
       # price_file: ./custom-prices.json # optional pricesource JSON table layered ahead of models.dev

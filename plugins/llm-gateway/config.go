@@ -55,6 +55,9 @@ type CatalogConfig struct {
 	// true; set false to serve strictly from disk cache without background
 	// network fetches.
 	Refresh *bool `yaml:"refresh"`
+	// Warmup fetches metadata before serving and fails startup on fetch failure.
+	// Useful for an installed service that must not start with an empty catalog.
+	Warmup bool `yaml:"warmup"`
 }
 
 func (c CatalogConfig) ttlDuration() (time.Duration, error) {
@@ -207,6 +210,9 @@ type ProviderConfig struct {
 	// Headers are optional static HTTP headers sent on every upstream request
 	// to this provider (e.g. x-opencode-session).
 	Headers map[string]string `yaml:"headers"`
+	// OpenCodeSession requires X-Station-Session and sends a principal-scoped
+	// conversation identifier as x-opencode-session on inference requests.
+	OpenCodeSession bool `yaml:"opencode_session"`
 	// DiscoverModels queries GET <base_url>/models at startup and registers any
 	// discovered model IDs not already declared in models.
 	DiscoverModels bool `yaml:"discover_models"`
@@ -236,6 +242,9 @@ type ModelConfig struct {
 type TargetConfig struct {
 	Provider string `yaml:"provider"`
 	Model    string `yaml:"model"`
+	// Operations narrows the native endpoint families this model supports.
+	// Empty retains dialect defaults; explicit lists are recommended for live routes.
+	Operations []Operation `yaml:"operations"`
 	// Translate opts this target in to cross-protocol translation when called
 	// from another dialect's endpoint (for example an OpenAI /v1/chat/completions
 	// request routed to an Anthropic provider, or vice versa). Default false:
@@ -342,6 +351,13 @@ func (c *Config) Validate() error {
 			}
 			op, _ := m.operation()
 			upDialect := dialectOf(c, t.Provider)
+			seenOps := map[Operation]bool{}
+			for _, allowed := range t.Operations {
+				if seenOps[allowed] || upDialect.UpstreamPath(allowed) == "" || (allowed != op && !(op == OpChat && allowed == OpResponses)) {
+					return fmt.Errorf("llm-gateway: model %q: incompatible or duplicate operation %q", m.Name, allowed)
+				}
+				seenOps[allowed] = true
+			}
 			if upDialect.UpstreamPath(op) == "" {
 				return fmt.Errorf("llm-gateway: model %q targets provider %q, whose dialect does not offer %s", m.Name, t.Provider, op)
 			}

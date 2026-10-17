@@ -37,6 +37,7 @@ type provider struct {
 	dialect         Dialect
 	baseURL         string
 	headers         map[string]string
+	opencodeSession bool
 	apiKey          string
 	client          *http.Client
 }
@@ -44,6 +45,7 @@ type provider struct {
 type target struct {
 	provider      *provider
 	model         string
+	operations    []Operation
 	translate     bool
 	tags          []string
 	bestEffort    bool
@@ -137,6 +139,7 @@ func NewGateway(cfg Config, providers map[string]*provider, ledger *Ledger, logg
 				bestEffort:    t.BestEffort,
 				headerTimeout: t.headerTimeout(),
 				capsCfg:       t.Capabilities,
+				operations:    t.Operations,
 				caps:          t.Capabilities.resolve(),
 				price:         snapshot(t.Price),
 			})
@@ -204,6 +207,9 @@ func (g *Gateway) eligible(d Dialect, op Operation, meta Meta) []*target {
 	}
 	var out []*target
 	for _, t := range g.models[meta.Model] {
+		if len(t.operations) > 0 && !slices.Contains(t.operations, op) {
+			continue
+		}
 		caps := t.caps
 		if g.catalog != nil {
 			caps, _, _, _, _ = g.catalog.ResolveTargetDetails(t)
@@ -247,6 +253,12 @@ func (g *Gateway) refuse(w http.ResponseWriter, d Dialect, caller Caller, reques
 
 func (g *Gateway) relay(w http.ResponseWriter, r *http.Request, d Dialect, op Operation) {
 	caller, requestID := callerOf(r), platform.RequestID(r)
+	conversation, err := conversationOf(r, caller)
+	if err != nil {
+		g.refuse(w, d, caller, requestID, "", http.StatusBadRequest, "invalid_session", err.Error())
+		return
+	}
+	caller.ConversationID = conversation
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		var tooBig *http.MaxBytesError
@@ -318,6 +330,11 @@ func (g *Gateway) relay(w http.ResponseWriter, r *http.Request, d Dialect, op Op
 			continue
 		}
 		tried = true
+		if t.provider.opencodeSession && caller.ConversationID == "" {
+			ticket.Release()
+			g.refuse(w, d, caller, requestID, meta.Model, http.StatusBadRequest, "session_required", "this provider requires X-Station-Session: a stable opaque conversation ID")
+			return
+		}
 		start := time.Now()
 
 		upDialect := t.provider.dialect
@@ -366,6 +383,9 @@ func (g *Gateway) relay(w http.ResponseWriter, r *http.Request, d Dialect, op Op
 		upDialect.Authorize(req, r, t.provider.apiKey)
 		for k, v := range t.provider.headers {
 			req.Header.Set(k, v)
+		}
+		if t.provider.opencodeSession {
+			req.Header.Set("X-Opencode-Session", caller.ConversationID)
 		}
 		// The meter must read plain bytes.
 		req.Header.Set("Accept-Encoding", "identity")
@@ -697,6 +717,7 @@ func (g *Gateway) modelsFor(d Dialect) []ModelInfo {
 				aggCaps.Temperature = aggCaps.Temperature || vc.Temperature
 			}
 			tinfos = append(tinfos, TargetInfo{
+				Operations:   t.operations,
 				Provider:     t.provider.id,
 				Model:        t.model,
 				Dialect:      upDialect.Name(),

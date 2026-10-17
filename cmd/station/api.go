@@ -59,6 +59,9 @@ var starterIdentities = map[string]struct{ id, version string }{
 // roots under stateDir and an explicit, empty grant set: the starters need no
 // host services, so they are delegated no authority.
 func initFactories(cfg *config.Config, stateDir string) (map[string]config.InprocessInitFactory, error) {
+	if cfg == nil {
+		return nil, nil
+	}
 	hostInstance, err := pluginhost.NewHostInstance()
 	if err != nil {
 		return nil, err

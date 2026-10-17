@@ -53,6 +53,7 @@ var pgMigrations = []string{
 	CREATE INDEX llm_calls_principal ON llm_calls (principal, recorded_at);
 	CREATE INDEX llm_calls_target ON llm_calls (provider, model, recorded_at);
 	CREATE INDEX llm_calls_request ON llm_calls (request_id);`,
+	`ALTER TABLE llm_calls ADD COLUMN conversation_id text NOT NULL DEFAULT '';`,
 }
 
 const migrationLock = 7301160 // arbitrary, stable: serializes concurrent starters
@@ -111,8 +112,8 @@ func (s *pgStore) migrate(ctx context.Context) error {
 
 const insertEntry = `INSERT INTO llm_calls
 	(id, recorded_at, request_id, principal, verified, operation, dialect, alias, provider, model,
-	 status, outcome, streamed, latency_ms, usage, price, cost_kind, cost_usd, cost_partial, detail)
-	VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+	 status, outcome, streamed, latency_ms, usage, price, cost_kind, cost_usd, cost_partial, detail, conversation_id)
+	VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
 	ON CONFLICT (id) DO NOTHING`
 
 func (s *pgStore) Add(ctx context.Context, entries ...Entry) error {
@@ -139,7 +140,7 @@ func (s *pgStore) Add(ctx context.Context, entries ...Entry) error {
 		}
 		batch.Queue(insertEntry, e.ID, e.Row.RecordedAt, e.RequestID, e.Row.SessionID, e.Verified, string(e.Operation),
 			e.Dialect, e.Alias, e.Row.Provider, e.Row.Model, e.Status, e.Outcome, e.Streamed, e.LatencyMS,
-			usage, price, string(e.Row.CostKind), e.CostUSD, e.CostPartial, detail)
+			usage, price, string(e.Row.CostKind), e.CostUSD, e.CostPartial, detail, e.ConversationID)
 	}
 	res := s.pool.SendBatch(ctx, batch)
 	defer res.Close()
@@ -180,7 +181,7 @@ func (s *pgStore) Recent(ctx context.Context, q Query) ([]Entry, error) {
 	}
 	args = append(args, limit)
 	rows, err := s.pool.Query(ctx, fmt.Sprintf(`SELECT id, recorded_at, request_id, principal, verified, operation, dialect,
-		alias, provider, model, status, outcome, streamed, latency_ms, usage, price, cost_kind, cost_usd, cost_partial, detail
+		alias, provider, model, status, outcome, streamed, latency_ms, usage, price, cost_kind, cost_usd, cost_partial, detail, conversation_id
 		FROM (SELECT * FROM llm_calls%s ORDER BY recorded_at DESC, id DESC LIMIT $%d) recent
 		ORDER BY recorded_at, id`, w, len(args)), args...)
 	if err != nil {
@@ -197,7 +198,7 @@ func (s *pgStore) Recent(ctx context.Context, q Query) ([]Entry, error) {
 		)
 		if err := rows.Scan(&e.ID, &e.Row.RecordedAt, &e.RequestID, &e.Row.SessionID, &e.Verified, &op, &e.Dialect,
 			&e.Alias, &e.Row.Provider, &e.Row.Model, &e.Status, &e.Outcome, &e.Streamed, &e.LatencyMS,
-			&usage, &price, &costKind, &e.CostUSD, &e.CostPartial, &detail); err != nil {
+			&usage, &price, &costKind, &e.CostUSD, &e.CostPartial, &detail, &e.ConversationID); err != nil {
 			return nil, fmt.Errorf("scan ledger row: %w", err)
 		}
 		e.Operation, e.Row.CostKind, e.Row.MessageID = Operation(op), usageledger.CostKind(costKind), e.RequestID
