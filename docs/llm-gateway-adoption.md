@@ -17,7 +17,10 @@ separately in CW-20261017-0032; this guide describes the Station contract.
 - Health: `GET https://llm.nanite.cloud/healthz` (no credential; liveness only).
 - Authentication is enforced on every gateway route, including loopback.
 
-The HTTPS route requires the prepared Caddy installation before use. A generic
+The HTTPS route was activated and verified on 2026-10-17. The complete live
+matrix passed through Caddy: 12 model routes, three streaming API families,
+three tool-call probes, auth/scope restrictions, and persisted attribution for
+all 18 inference requests. TLS certificate validation was enabled. A generic
 agent-os landing response is not gateway readiness: `/v1/models` must return 401
 without a key, and a JSON model list with an authorized key.
 
