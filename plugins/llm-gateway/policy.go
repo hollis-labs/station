@@ -281,6 +281,9 @@ func (a slogAudit) Record(_ context.Context, ev policy.AuditEvent) error {
 
 // Budget refusal cannot be relaxed by policy shadow mode or an allow rule.
 func budgetRefusal(s BudgetStatus) policyRefusal {
+	if s.State == "unbounded" {
+		return policyRefusal{status: http.StatusUnprocessableEntity, code: "budget_cost_unbounded", message: "usage budget requires a supported cost bound for this request and target"}
+	}
 	if s.State == "price_unknown" {
 		return policyRefusal{status: http.StatusServiceUnavailable, code: "budget_price_unknown", message: "usage budget requires known base token pricing for this operation"}
 	}

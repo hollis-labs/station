@@ -308,12 +308,58 @@ window expiry; it is never assumed free. The retained row remains visible in
 `/v1/usage` even after its window expires. `recorded_at` for reserved attempts is
 admission time, so a long call settles into the window in which it started.
 
-Request limits now cover in-flight attempts across processes and restarts with
-SQL storage. Spend limits conservatively block overlapping attempts while cost
-is unresolved; they do **not** yet bound a single attempt's dollar cost. Priced
-per-call bounds and complete metering remain CW-20261017-0021. Usage summary
-totals still aggregate successful calls; budget counters also include outstanding
-and other recorded outcomes.
+Request limits cover in-flight attempts across processes and restarts with SQL
+storage. Spend limits block overlapping attempts while cost is unresolved.
+By default, `max_usd` checks observed spend and does **not** bound a single
+attempt's dollar cost. Set `require_cost_bound: true` on a spend budget to require
+the entire attempt to fit before dispatch. Unsupported shapes or missing target
+contracts return `422 budget_cost_unbounded`; a supported bound that does not fit
+returns `429 budget_exceeded`. Existing configurations retain their default behavior.
+
+The first bounded method is `tokenized_embeddings_v1`, declared explicitly with
+`cost_bound_method` on a native OpenAI-dialect embedding target. This is an
+operator assertion that the endpoint charges only a flat input-token rate for
+the supplied token-ID arrays, using the resolved price snapshot. Verify this
+against the provider/account contract; protocol compatibility alone is insufficient.
+It accepts one nonempty array of nonnegative integer token IDs or a batch of such
+arrays. Only `model`, `input`, `dimensions`, `encoding_format`, and `user` are
+accepted. Plain text, other operations, additional fields, and beta headers are
+unbounded and refused in strict mode. No tokenizer or model-limit guesses are used.
+
+For example, after configuring an appropriate provider and current input price:
+
+```yaml
+models:
+  - name: embed-bounded
+    kind: embedding
+    targets:
+      - provider: embedding-provider
+        model: embedding-model
+        cost_bound_method: tokenized_embeddings_v1
+budgets:
+  - id: embedding-spend
+    model: embed-bounded
+    max_usd: 1.00
+    require_cost_bound: true
+```
+
+Strict budgets round their limit down and charges up to microdollars (minimum
+limit `$0.000001`). Admission checks the full bound under the ledger lock, then
+persists it as `cost_bound` with the pending row. This metadata is immutable and
+remains in `/v1/usage` after settlement. Pending or incomplete usage still blocks
+other matching spend, including after restart; a bound is not treated as actual
+usage and does not permit overlapping attempts in this version. Embedding usage
+must report matching `prompt_tokens` and `total_tokens` equal to the admitted
+input count, with no additional usage fields. A mismatch marks cost partial,
+logs `budget.bound_usage_mismatch`, and blocks further spend in that window.
+
+These are bounds at the captured configured rates, not guarantees about a
+provider invoice. General chat/tool/multimodal bounds, complete feature pricing,
+and reconciliation remain CW-20261017-0021. Usage summary totals still aggregate
+successful calls; budget counters also include outstanding and other outcomes.
+PostgreSQL ledger schema v3 adds nullable `cost_bound` metadata while preserving
+existing rows. Earlier binaries refuse that newer schema; deployment rollback
+requires a compatible binary or a restored pre-upgrade database.
 
 Memory storage is only for one process and loses state on restart. With budgets
 it refuses admission when history capacity is full instead of evicting accounting
