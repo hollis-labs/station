@@ -28,7 +28,9 @@ const (
 // Plugin is the llm-gateway platform plugin.
 type Plugin struct {
 	// transport overrides the upstream HTTP transport; tests inject one.
-	transport http.RoundTripper
+	transport       http.RoundTripper
+	managementPath  string
+	runningRevision int64
 }
 
 // New returns the plugin.
@@ -139,7 +141,12 @@ func (p *Plugin) Register(ctx context.Context, reg *platform.PluginRegistry, dec
 		Reason: "only translates a header; the fail-closed authn middleware runs immediately after",
 		Wrap: func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if strings.HasPrefix(r.URL.Path, prefix) && r.Header.Get("Authorization") == "" {
+				isManagement := strings.HasPrefix(r.URL.Path, prefix+"v1/management/")
+				if isManagement {
+					w.Header().Set("Cache-Control", "no-store")
+					w.Header().Set("X-Content-Type-Options", "nosniff")
+				}
+				if !isManagement && strings.HasPrefix(r.URL.Path, prefix) && r.Header.Get("Authorization") == "" {
 					if k := r.Header.Get("X-Api-Key"); k != "" {
 						r.Header.Set("Authorization", "Bearer "+k)
 					}
@@ -165,6 +172,22 @@ func (p *Plugin) Register(ctx context.Context, reg *platform.PluginRegistry, dec
 		{Method: "GET", Path: "/v1/usage", Scope: ScopeUsageRead, Handler: gw.UsageHandler()},
 	} {
 		if err := reg.Mount(rt); err != nil {
+			return err
+		}
+	}
+	if p.managementPath != "" {
+		if p.runningRevision <= 0 {
+			return fmt.Errorf("llm-gateway: management requires the loaded running revision")
+		}
+		if _, err := os.Stat(p.managementPath); err != nil {
+			return err
+		}
+		management, err := OpenManagementStore(ctx, p.managementPath)
+		if err != nil {
+			return err
+		}
+		reg.OnStop(func(context.Context) error { return management.Close() })
+		if err := p.registerManagement(reg, management); err != nil {
 			return err
 		}
 	}

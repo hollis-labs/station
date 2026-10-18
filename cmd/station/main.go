@@ -1,6 +1,7 @@
 // Command station hosts MCP logical servers and opt-in HTTP plugin APIs.
 // Use -api-only with -api-config for an HTTP service without MCP processes.
-// CLI subcommands are the operator surface; Station has no management API.
+// Logical-server operations remain CLI-only. The LLM gateway has an opt-in
+// management API when started with -gateway-db.
 package main
 
 import (

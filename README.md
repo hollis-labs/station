@@ -79,8 +79,8 @@ per-app credentials, conversation headers, native API families, and live probes.
 
 ## SQLite gateway state
 
-The optional SQLite store is the persistence foundation for the forthcoming LLM
-management API. It stores versioned gateway configuration (providers, ordered
+The optional SQLite store backs the LLM gateway management API.
+It stores versioned gateway configuration (providers, ordered
 model routes/fallbacks, capabilities/prices, policy rules, budgets and catalog
 settings), hashed client identities/scopes, immutable revision history and an
 activation audit. Usage can share the same database via `ledger.store: sqlite`.
@@ -183,11 +183,14 @@ and migrate historical entries before a live cutover. SQLite uses the same
 bounded asynchronous usage writer as PostgreSQL: committed batches are atomic
 and idempotent, but queued records can still be lost on crash/overflow.
 
-HTTP management editing endpoints and hot application of changes are subsequent
-work. Their initial access will use the portfolio `Authorization: Bearer` pattern
-and dedicated management scopes through the shared auth library. Existing chat
-credentials should receive only inference/model-read scopes; they do not need
-management authority. No new HTTP management routes are exposed by this step.
+Starting with `-gateway-db` also enables the [management API](docs/llm-gateway-management.md)
+under `/api/llm-gateway/v1/management`. It uses the portfolio
+`Authorization: Bearer` pattern and dedicated management scopes through the
+shared auth library. Operators can stage configuration and credential changes,
+validate them, inspect history, and select a revision for the next service reload.
+Status distinguishes latest, selected and actually running revisions; selection
+does not hot-reload the gateway. Existing chat credentials should receive only
+inference/model-read scopes. YAML-only deployments do not expose management routes.
 
 ## Plugin platform and the LLM gateway
 

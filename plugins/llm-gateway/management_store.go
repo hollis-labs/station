@@ -372,3 +372,33 @@ func (s *ManagementStore) History(ctx context.Context, before int64, limit int) 
 	}
 	return out, rows.Err()
 }
+
+// ManagementActivation is the durable record of a selection for next startup.
+// It deliberately does not claim that a running process has applied it.
+type ManagementActivation struct {
+	ID               int64  `json:"id"`
+	ActivatedAt      string `json:"activated_at"`
+	Actor            string `json:"actor"`
+	PreviousRevision int64  `json:"previous_revision"`
+	Revision         int64  `json:"revision"`
+}
+
+func (s *ManagementStore) Activations(ctx context.Context, before int64, limit int) ([]ManagementActivation, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id,activated_at,actor,coalesce(previous_revision,0),revision FROM gateway_activations WHERE (?=0 OR id<?) ORDER BY id DESC LIMIT ?`, before, before, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ManagementActivation{}
+	for rows.Next() {
+		var a ManagementActivation
+		if err := rows.Scan(&a.ID, &a.ActivatedAt, &a.Actor, &a.PreviousRevision, &a.Revision); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
