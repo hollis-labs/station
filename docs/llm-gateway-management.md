@@ -5,11 +5,24 @@ when Station starts with `-gateway-db /absolute/private/gateway.db`. YAML-only
 deployments keep serving inference without management routes. The database must
 already have a selected revision; see the README's SQLite import instructions.
 
-Base URL on the dogfood host, **once this change is deployed and enabled**:
+Base URL on the dogfood host, enabled and verified on 2026-10-18:
 
 ```text
 https://llm.nanite.cloud/api/llm-gateway/v1/management
 ```
+
+The Cerberus resource `station-llm-gateway` starts with
+`-gateway-db /home/chrispian/.local/state/station/gateway/gateway.db`.
+SQLite owns gateway configuration and hashed client identities. The bootstrap
+`/home/chrispian/.config/station/gateway/api.yaml` still owns listener/auth settings
+and other plugins. PostgreSQL remains the usage ledger; this cutover did not
+migrate or discard usage history.
+
+The host-local dedicated credential is
+`/home/chrispian/.config/station/gateway/tokens/management.token` (0600).
+It belongs to `station-management`; give adopting integrations their own identity
+and only their needed scopes. The existing operator and smoke credentials cannot
+access management. See the [adoption guide](llm-gateway-adoption.md) for provisioning.
 
 All requests use `Authorization: Bearer <station-client-token>`. Use the portfolio
 client pattern: read the token from a private file or approved secret mechanism,
@@ -187,6 +200,27 @@ with opener.open(request, timeout=30) as response:
 ```
 
 ## Probes and failures
+
+The live cutover exercised configuration staging, stale/missing preconditions,
+selection, reload and rollback. Latest, selected and running revisions were then
+aligned with the original settings and no pending test edit. Auth checks verified
+operator/app denial and rejection of `x-api-key` on management. All 65 pre-cutover
+usage entries remained, and three new OpenCode Go calls (Chat Completions,
+Responses and Messages) persisted verified attribution. These are dated deployment
+results, not a guarantee about a later configuration.
+
+For recovery, retain bootstrap YAML, the Cerberus descriptor and the installed
+artifact alongside a consistent SQLite backup made with SQLite's backup API.
+Do not copy only the live `.db` file while WAL writes may be pending. Usage backups
+remain a separate PostgreSQL concern. On this host, the private
+`~/.config/station/gateway/management-cutover-backup` file points to the cutover
+snapshot and verification records. Treat snapshots as sensitive: old revisions
+can restore revoked identities, and their hashes and secret references are private.
+
+Cerberus `reload` restarts the existing service definition. When changing launch
+arguments such as `-gateway-db`, use `apply` to update that definition with the
+already installed artifact, or `deploy` when source changed. Check the actual
+management running revision after either operation.
 
 `scripts/gateway-management-smoke.py --base-url BASE --token-file FILE` checks
 the authenticated status/config/history reads, absence of credential hashes,
