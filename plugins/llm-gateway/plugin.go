@@ -51,6 +51,9 @@ func (p *Plugin) Register(ctx context.Context, reg *platform.PluginRegistry, dec
 	}
 	providers := map[string]*provider{}
 	for _, pc := range cfg.Providers {
+		if !enabled(pc.Enabled) {
+			continue
+		}
 		key := ""
 		if pc.APIKeyRef != "" {
 			k, err := reg.ResolveSecret(ctx, pc.APIKeyRef)
@@ -75,7 +78,11 @@ func (p *Plugin) Register(ctx context.Context, reg *platform.PluginRegistry, dec
 		}
 	}
 	if len(cfg.Models) == 0 {
-		return fmt.Errorf("llm-gateway: at least one model is required")
+		for _, pc := range cfg.Providers {
+			if enabled(pc.Enabled) && pc.DiscoverModels {
+				return fmt.Errorf("llm-gateway: discovery returned no models")
+			}
+		}
 	}
 	store, err := openStore(ctx, cfg.Ledger, reg)
 	if err != nil {
@@ -190,6 +197,13 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // openStore builds the configured ledger store. The durable store is wrapped
 // so the database is never on the request path.
 func openStore(ctx context.Context, cfg LedgerConfig, reg *platform.PluginRegistry) (Store, error) {
+	if cfg.Store == "sqlite" {
+		s, err := openSQLiteStore(ctx, cfg.SQLite.Path)
+		if err != nil {
+			return nil, err
+		}
+		return newAsyncStore(s, reg.Logger()), nil
+	}
 	if cfg.Store != "postgres" {
 		return newMemStore(cfg.History), nil
 	}

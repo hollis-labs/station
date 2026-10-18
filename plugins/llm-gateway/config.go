@@ -14,6 +14,7 @@ package llmgateway
 import (
 	"fmt"
 	"path"
+	"path/filepath"
 	"regexp"
 	"time"
 
@@ -22,42 +23,42 @@ import (
 
 // Config is the plugin's configuration block (plugins.llm-gateway in api.yaml).
 type Config struct {
-	Providers []ProviderConfig `yaml:"providers"`
-	Models    []ModelConfig    `yaml:"models"`
+	Providers []ProviderConfig `yaml:"providers" json:"providers"`
+	Models    []ModelConfig    `yaml:"models" json:"models"`
 	// Catalog configures the centralized model metadata and pricing catalog
 	// backed by models.dev (default 90s TTL) and pricesource.
-	Catalog CatalogConfig `yaml:"catalog"`
+	Catalog CatalogConfig `yaml:"catalog" json:"catalog"`
 	// Budgets configures spend and request limits measured over the ledger.
-	Budgets []BudgetConfig `yaml:"budgets"`
+	Budgets []BudgetConfig `yaml:"budgets" json:"budgets"`
 	// Policy configures the llm.invoke admission decision.
-	Policy PolicyConfig `yaml:"policy"`
+	Policy PolicyConfig `yaml:"policy" json:"policy"`
 	// MaxBodyBytes caps request bodies on the gateway's routes (images and long
 	// contexts are large). Default 32 MiB.
-	MaxBodyBytes int64 `yaml:"max_body_bytes"`
+	MaxBodyBytes int64 `yaml:"max_body_bytes" json:"max_body_bytes"`
 	// Ledger configures where usage records live.
-	Ledger LedgerConfig `yaml:"ledger"`
+	Ledger LedgerConfig `yaml:"ledger" json:"ledger"`
 }
 
 // CatalogConfig configures the centralized model metadata and pricing catalog.
 type CatalogConfig struct {
 	// TTL is how long cached model data is considered fresh before refreshing
 	// (a positive Go duration such as "90s" or "5m"). Default "90s".
-	TTL string `yaml:"ttl"`
+	TTL string `yaml:"ttl" json:"ttl"`
 	// CacheDir overrides the directory where catalog.json is stored on disk
 	// (default ~/.cache/go-modelsdev).
-	CacheDir string `yaml:"cache_dir"`
+	CacheDir string `yaml:"cache_dir" json:"cache_dir"`
 	// URL overrides the models.dev API endpoint (default https://models.dev/api.json).
-	URL string `yaml:"url"`
+	URL string `yaml:"url" json:"url"`
 	// PriceFile is an optional path to a pricesource JSON price table
 	// (pricesource.LoadFile) layered ahead of models.dev.
-	PriceFile string `yaml:"price_file"`
+	PriceFile string `yaml:"price_file" json:"price_file"`
 	// Refresh controls whether the background refresher runs on TTL. Default
 	// true; set false to serve strictly from disk cache without background
 	// network fetches.
-	Refresh *bool `yaml:"refresh"`
+	Refresh *bool `yaml:"refresh" json:"refresh"`
 	// Warmup fetches metadata before serving and fails startup on fetch failure.
 	// Useful for an installed service that must not start with an empty catalog.
-	Warmup bool `yaml:"warmup"`
+	Warmup bool `yaml:"warmup" json:"warmup"`
 }
 
 func (c CatalogConfig) ttlDuration() (time.Duration, error) {
@@ -85,67 +86,80 @@ func (c CatalogConfig) validate() error {
 
 // BudgetConfig defines one spend or request limit measured over the ledger.
 type BudgetConfig struct {
-	ID string `yaml:"id"`
+	ID string `yaml:"id" json:"id"`
 	// Scope is "total" (default; all callers share the limit) or "principal"
 	// (each verified caller gets its own counter).
-	Scope string `yaml:"scope"`
+	Scope string `yaml:"scope" json:"scope"`
 	// Principal is an optional glob filtering which callers this budget applies
 	// to ("ci-*"). Empty matches all callers.
-	Principal string `yaml:"principal"`
+	Principal string `yaml:"principal" json:"principal"`
 	// Model is an optional glob filtering which model aliases this budget
 	// counts and gates. Empty matches all models.
-	Model string `yaml:"model"`
+	Model string `yaml:"model" json:"model"`
 	// Window is "day", "week", "month" (UTC calendar windows) or a positive Go
 	// duration such as "1h" or "24h" (rolling window). Default "month".
-	Window string `yaml:"window"`
+	Window string `yaml:"window" json:"window"`
 	// MaxUSD caps estimated spend in US dollars over Window.
-	MaxUSD float64 `yaml:"max_usd"`
+	MaxUSD float64 `yaml:"max_usd" json:"max_usd"`
 	// MaxRequests caps call count over Window.
-	MaxRequests int64 `yaml:"max_requests"`
+	MaxRequests int64 `yaml:"max_requests" json:"max_requests"`
 }
 
 // LedgerConfig selects the ledger's store and payload capture policy.
 type LedgerConfig struct {
-	// Store is "memory" (default; lost on restart) or "postgres" (durable).
-	Store string `yaml:"store"`
+	// Store is "memory" (default), "postgres" or "sqlite" (durable).
+	Store string `yaml:"store" json:"store"`
 	// History is how many entries the memory store keeps. Default 1000.
-	History  int            `yaml:"history"`
-	Postgres PostgresConfig `yaml:"postgres"`
+	History  int            `yaml:"history" json:"history"`
+	Postgres PostgresConfig `yaml:"postgres" json:"postgres"`
+	SQLite   SQLiteConfig   `yaml:"sqlite" json:"sqlite"`
 	// Capture configures sanitized leader, tool, request and response payload
 	// capture in Entry.Detail.
-	Capture CaptureConfig `yaml:"capture"`
+	Capture CaptureConfig `yaml:"capture" json:"capture"`
 }
 
 // CaptureConfig controls what payload data is sanitized and stored in Detail.
 type CaptureConfig struct {
 	// Mode is "off" (default: only decision answers are stored) or "full"
 	// (sanitized leader/system prompt, tools, request and response/SSE events).
-	Mode string `yaml:"mode"`
+	Mode string `yaml:"mode" json:"mode"`
 	// MaxBytes caps each payload passed to security/redact's Sanitizer
 	// (default 256 KiB). Oversized payloads fail closed to a tombstone.
-	MaxBytes int `yaml:"max_bytes"`
+	MaxBytes int `yaml:"max_bytes" json:"max_bytes"`
 }
 
 // PostgresConfig locates the durable ledger. The DSN carries a password, so it
 // is a secret reference (or an environment variable), never a literal. Point it
 // at a database and role dedicated to the ledger.
 type PostgresConfig struct {
-	DSNRef string `yaml:"dsn_ref"`
-	DSNEnv string `yaml:"dsn_env"`
+	DSNRef string `yaml:"dsn_ref" json:"dsn_ref"`
+	DSNEnv string `yaml:"dsn_env" json:"dsn_env"`
+}
+
+type SQLiteConfig struct {
+	// Path is an absolute path in an owner-only directory; may share the management database.
+	Path string `yaml:"path" json:"path"`
 }
 
 func (l LedgerConfig) validate() error {
+	if l.Store != "sqlite" && l.SQLite.Path != "" {
+		return fmt.Errorf("llm-gateway: ledger.sqlite requires store sqlite")
+	}
+	if l.Store != "postgres" && l.Postgres != (PostgresConfig{}) {
+		return fmt.Errorf("llm-gateway: ledger.postgres requires store postgres")
+	}
 	switch l.Store {
 	case "", "memory":
-		if l.Postgres != (PostgresConfig{}) {
-			return fmt.Errorf("llm-gateway: ledger.postgres is set but ledger.store is not postgres")
+	case "sqlite":
+		if !filepath.IsAbs(l.SQLite.Path) || filepath.Clean(l.SQLite.Path) != l.SQLite.Path {
+			return fmt.Errorf("llm-gateway: ledger.sqlite.path must be absolute and clean")
 		}
 	case "postgres":
 		if (l.Postgres.DSNRef == "") == (l.Postgres.DSNEnv == "") {
 			return fmt.Errorf("llm-gateway: ledger.postgres needs exactly one of dsn_ref or dsn_env")
 		}
 	default:
-		return fmt.Errorf("llm-gateway: ledger.store must be memory or postgres")
+		return fmt.Errorf("llm-gateway: ledger.store must be memory, postgres or sqlite")
 	}
 	if l.History < 0 {
 		return fmt.Errorf("llm-gateway: ledger.history must not be negative")
@@ -165,116 +179,120 @@ func (l LedgerConfig) validate() error {
 type PolicyConfig struct {
 	// Mode is "shadow" (evaluate and audit, admit everything; the default) or
 	// "enforce". Shadow first: turn enforce on once the audit log looks right.
-	Mode string `yaml:"mode"`
+	Mode string `yaml:"mode" json:"mode"`
 	// DefaultEffect applies when no rule matches: allow (default), ask or deny.
-	DefaultEffect string `yaml:"default_effect"`
+	DefaultEffect string `yaml:"default_effect" json:"default_effect"`
 	// Rules are evaluated in order; the first match decides.
-	Rules []RuleConfig `yaml:"rules"`
+	Rules []RuleConfig `yaml:"rules" json:"rules"`
 }
 
 // RuleConfig is one declarative policy rule. Empty match fields match anything.
 type RuleConfig struct {
-	ID string `yaml:"id"`
+	ID string `yaml:"id" json:"id"`
 	// Principal is a glob over the verified principal ID ("ci-*").
-	Principal string `yaml:"principal"`
+	Principal string `yaml:"principal" json:"principal"`
 	// Model is a glob over the requested model name.
-	Model string `yaml:"model"`
+	Model string `yaml:"model" json:"model"`
 	// Provider is a glob over the candidate target's provider ID.
-	Provider string `yaml:"provider"`
+	Provider string `yaml:"provider" json:"provider"`
 	// Tag matches a candidate target carrying this tag ("local", "free", "paid").
-	Tag string `yaml:"tag"`
+	Tag string `yaml:"tag" json:"tag"`
 	// Operation matches chat, embedding or decision requests.
-	Operation string `yaml:"operation"`
+	Operation string `yaml:"operation" json:"operation"`
 	// Needs matches requests that need one of: tools, vision, streaming.
-	Needs string `yaml:"needs"`
+	Needs string `yaml:"needs" json:"needs"`
 	// BudgetState matches "ok" or "exhausted" from the quota evaluator.
-	BudgetState string `yaml:"budget_state"`
-	Effect      string `yaml:"effect"`
-	Reason      string `yaml:"reason"`
+	BudgetState string `yaml:"budget_state" json:"budget_state"`
+	Effect      string `yaml:"effect" json:"effect"`
+	Reason      string `yaml:"reason" json:"reason"`
 }
 
 // ProviderConfig describes one upstream endpoint.
 type ProviderConfig struct {
-	ID string `yaml:"id"`
+	ID string `yaml:"id" json:"id"`
+	// Enabled defaults to true. Disabled providers retain configuration but serve no traffic.
+	Enabled *bool `yaml:"enabled" json:"enabled,omitempty"`
 	// Dialect is the provider's native wire protocol: "openai" (Chat
 	// Completions and Embeddings, and servers that copy them), "anthropic"
 	// (Messages) or "jev" (System-1 decisions).
-	Dialect string `yaml:"dialect"`
+	Dialect string `yaml:"dialect" json:"dialect"`
 	// CatalogProvider overrides the models.dev provider ID used to look up
 	// model pricing, limits, and capabilities (e.g. "openrouter", "opencode",
 	// "huggingface"). Empty defaults to ID then Dialect.
-	CatalogProvider string `yaml:"catalog_provider"`
+	CatalogProvider string `yaml:"catalog_provider" json:"catalog_provider"`
 	// BaseURL is the API root as the vendor documents it, including the
 	// version segment ("https://api.openai.com/v1").
-	BaseURL string `yaml:"base_url"`
+	BaseURL string `yaml:"base_url" json:"base_url"`
 	// Headers are optional static HTTP headers sent on every upstream request
 	// to this provider (e.g. x-opencode-session).
-	Headers map[string]string `yaml:"headers"`
+	Headers map[string]string `yaml:"headers" json:"headers"`
 	// OpenCodeSession requires X-Station-Session and sends a principal-scoped
 	// conversation identifier as x-opencode-session on inference requests.
-	OpenCodeSession bool `yaml:"opencode_session"`
+	OpenCodeSession bool `yaml:"opencode_session" json:"opencode_session"`
 	// DiscoverModels queries GET <base_url>/models at startup and registers any
 	// discovered model IDs not already declared in models.
-	DiscoverModels bool `yaml:"discover_models"`
+	DiscoverModels bool `yaml:"discover_models" json:"discover_models"`
 	// APIKeyEnv names the environment variable holding the upstream key. The
 	// key itself never appears in configuration. Empty means no credential.
-	APIKeyEnv string `yaml:"api_key_env"`
+	APIKeyEnv string `yaml:"api_key_env" json:"api_key_env"`
 	// APIKeyRef is a secret reference (keychain://openai/work, op://..., file://...)
 	// resolved at startup. Provision one with `station secret set <ref>`.
 	// Use this or api_key_env, not both.
-	APIKeyRef      string `yaml:"api_key_ref"`
-	TimeoutSeconds int    `yaml:"timeout_seconds"`
+	APIKeyRef      string `yaml:"api_key_ref" json:"api_key_ref"`
+	TimeoutSeconds int    `yaml:"timeout_seconds" json:"timeout_seconds"`
 }
 
 // ModelConfig is a public model name and its ordered upstream targets.
 type ModelConfig struct {
 	// Name is what callers put in the request's "model" field.
-	Name string `yaml:"name"`
+	Name string `yaml:"name" json:"name"`
+	// Enabled defaults to true. Disabled aliases are hidden and cannot be invoked.
+	Enabled *bool `yaml:"enabled" json:"enabled,omitempty"`
 	// Kind is what the model does: "chat" (default), "embedding" or "decision"
 	// (a System-1 judgment model such as JEV). A model has one kind and a
 	// request for another is refused.
-	Kind string `yaml:"kind"`
+	Kind string `yaml:"kind" json:"kind"`
 	// Targets are tried in order until one is admitted and accepts the call.
-	Targets []TargetConfig `yaml:"targets"`
+	Targets []TargetConfig `yaml:"targets" json:"targets"`
 }
 
 // TargetConfig is one upstream model behind an alias.
 type TargetConfig struct {
-	Provider string `yaml:"provider"`
-	Model    string `yaml:"model"`
+	Provider string `yaml:"provider" json:"provider"`
+	Model    string `yaml:"model" json:"model"`
 	// Operations narrows the native endpoint families this model supports.
 	// Empty retains dialect defaults; explicit lists are recommended for live routes.
-	Operations []Operation `yaml:"operations"`
+	Operations []Operation `yaml:"operations" json:"operations"`
 	// Translate opts this target in to cross-protocol translation when called
 	// from another dialect's endpoint (for example an OpenAI /v1/chat/completions
 	// request routed to an Anthropic provider, or vice versa). Default false:
 	// targets only serve their native dialect unless explicitly opted in.
-	Translate bool `yaml:"translate"`
+	Translate bool `yaml:"translate" json:"translate"`
 	// Tags label the route for policy and discovery ("local", "free", "paid").
-	Tags []string `yaml:"tags"`
+	Tags []string `yaml:"tags" json:"tags"`
 	// BestEffort marks an opportunistic route (such as a tailnet llama server
 	// that may sleep or reboot): it uses a short connect/header timeout and
 	// trips its breaker on the first failure so a down local host never blocks
 	// hub requests.
-	BestEffort bool `yaml:"best_effort"`
+	BestEffort bool `yaml:"best_effort" json:"best_effort"`
 	// TimeoutMS overrides the response-header timeout for this target in
 	// milliseconds (default 1500ms when best_effort is true).
-	TimeoutMS int `yaml:"timeout_ms"`
+	TimeoutMS int `yaml:"timeout_ms" json:"timeout_ms"`
 	// Capabilities lets an operator mark what a target cannot do, so a
 	// request needing it skips the target. Unset means supported.
-	Capabilities CapabilitiesConfig `yaml:"capabilities"`
+	Capabilities CapabilitiesConfig `yaml:"capabilities" json:"capabilities"`
 	// Price is optional. With it, calls record an estimated cost; without it
 	// they record usage and an explicitly unpriced cost.
-	Price *PriceConfig `yaml:"price"`
+	Price *PriceConfig `yaml:"price" json:"price"`
 }
 
 // CapabilitiesConfig overrides a target's capabilities; nil means inherit from
 // the models.dev catalog (or supported when absent from the catalog).
 type CapabilitiesConfig struct {
-	Tools     *bool `yaml:"tools"`
-	Vision    *bool `yaml:"vision"`
-	Streaming *bool `yaml:"streaming"`
-	Reasoning *bool `yaml:"reasoning"`
+	Tools     *bool `yaml:"tools" json:"tools"`
+	Vision    *bool `yaml:"vision" json:"vision"`
+	Streaming *bool `yaml:"streaming" json:"streaming"`
+	Reasoning *bool `yaml:"reasoning" json:"reasoning"`
 }
 
 func (c CapabilitiesConfig) resolve() llmtypes.ProviderCapabilities {
@@ -286,11 +304,11 @@ func (c CapabilitiesConfig) resolve() llmtypes.ProviderCapabilities {
 
 // PriceConfig holds per-million-token rates in US dollars.
 type PriceConfig struct {
-	InputPerMillion      float64 `yaml:"input_per_million"`
-	OutputPerMillion     float64 `yaml:"output_per_million"`
-	CacheReadPerMillion  float64 `yaml:"cache_read_per_million"`
-	CacheWritePerMillion float64 `yaml:"cache_write_per_million"`
-	ReasoningPerMillion  float64 `yaml:"reasoning_per_million"`
+	InputPerMillion      float64 `yaml:"input_per_million" json:"input_per_million"`
+	OutputPerMillion     float64 `yaml:"output_per_million" json:"output_per_million"`
+	CacheReadPerMillion  float64 `yaml:"cache_read_per_million" json:"cache_read_per_million"`
+	CacheWritePerMillion float64 `yaml:"cache_write_per_million" json:"cache_write_per_million"`
+	ReasoningPerMillion  float64 `yaml:"reasoning_per_million" json:"reasoning_per_million"`
 }
 
 var idPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$`)
@@ -500,3 +518,5 @@ func (t TargetConfig) headerTimeout() time.Duration {
 	}
 	return 0
 }
+
+func enabled(value *bool) bool { return value == nil || *value }

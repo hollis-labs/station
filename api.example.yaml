@@ -88,7 +88,8 @@ plugins:
         window: month
         max_usd: 250.00
     ledger:
-      store: postgres                    # memory (default) is lost on restart
+      store: postgres                    # memory (default), postgres, or sqlite
+      # For SQLite replace postgres below with sqlite: {path: /absolute/private/gateway.db}.
       postgres:
         dsn_ref: keychain://station/ledger-dsn   # a database and role dedicated to the ledger
       capture:
