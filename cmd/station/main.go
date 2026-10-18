@@ -40,13 +40,15 @@ func run(args []string) int {
 		return runList(rest)
 	case "secret":
 		return runSecret(rest)
+	case "gateway-store":
+		return runGatewayStore(rest)
 	case "client":
 		return runClient(rest)
 	case "version":
 		fmt.Println("station " + version)
 		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "station: unknown subcommand %q\n\nUsage: station [serve|validate|list|secret|client|version] [flags]\n", cmd)
+		fmt.Fprintf(os.Stderr, "station: unknown subcommand %q\n\nUsage: station [serve|validate|list|secret|client|gateway-store|version] [flags]\n", cmd)
 		return 2
 	}
 }
@@ -67,6 +69,7 @@ func runServe(args []string) int {
 	configPath := fs.String("config", "station.yaml", "path to the logical-server config file")
 	httpAddr := fs.String("http-addr", ":8080", "address to serve HTTP-exposed logical servers on, if any are configured")
 	apiConfig := fs.String("api-config", "", "path to the HTTP API config (api.yaml); empty serves MCP logical servers only")
+	gatewayDB := fs.String("gateway-db", "", "load active gateway configuration and client hashes from this SQLite database")
 	apiOnly := fs.Bool("api-only", false, "serve only the HTTP API; requires -api-config and does not load MCP configuration")
 	stateDir := fs.String("state-dir", defaultStateDir(), "directory for plugin data and cache roots")
 	logFormat := fs.String("log-format", "json", "log format: json or text")
@@ -87,6 +90,10 @@ func runServe(args []string) int {
 	}
 	logger := logging.Logger
 
+	if *gatewayDB != "" && *apiConfig == "" {
+		fmt.Fprintln(os.Stderr, "station: -gateway-db requires -api-config")
+		return 2
+	}
 	cfg, err := loadMCPConfig(*configPath, *apiConfig, *apiOnly)
 	if err != nil {
 		logger.Error("station: failed to load config", "path", *configPath, "err", err)
@@ -112,7 +119,7 @@ func runServe(args []string) int {
 		logger.Error("station: failed to prepare plugin initialization", "err", err)
 		return 1
 	}
-	app, err := loadAPIApp(ctx, *apiConfig, logging)
+	app, err := loadAPIApp(ctx, *apiConfig, logging, *gatewayDB)
 	if err != nil {
 		logger.Error("station: failed to load API config", "path", *apiConfig, "err", err)
 		return 1
@@ -166,11 +173,16 @@ func runValidate(args []string) int {
 	fs := flag.NewFlagSet("station validate", flag.ContinueOnError)
 	configPath := fs.String("config", "station.yaml", "path to the logical-server config file")
 	apiConfig := fs.String("api-config", "", "also validate the HTTP API config (api.yaml), assembling plugins without listening")
+	gatewayDB := fs.String("gateway-db", "", "load active gateway configuration and client hashes from this SQLite database")
 	apiOnly := fs.Bool("api-only", false, "validate only the HTTP API configuration")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
+	if *gatewayDB != "" && *apiConfig == "" {
+		fmt.Fprintln(os.Stderr, "station: -gateway-db requires -api-config")
+		return 2
+	}
 	cfg, err := loadMCPConfig(*configPath, *apiConfig, *apiOnly)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "station: %s: invalid: %v\n", *configPath, err)
@@ -180,7 +192,7 @@ func runValidate(args []string) int {
 		fmt.Printf("station: %s: OK, %d logical server(s) configured\n", *configPath, len(cfg.LogicalServers))
 	}
 	if *apiConfig != "" {
-		app, err := loadAPIApp(context.Background(), *apiConfig, validateLogging())
+		app, err := loadAPIApp(context.Background(), *apiConfig, validateLogging(), *gatewayDB)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "station: %s: invalid: %v\n", *apiConfig, err)
 			return 1

@@ -27,7 +27,7 @@ func catalog() []platform.Plugin {
 
 // loadAPIApp builds the HTTP API from an api.yaml path. An empty path returns
 // nil: Station then only hosts MCP logical servers, as before.
-func loadAPIApp(ctx context.Context, path string, logging *platform.Logging) (*platform.App, error) {
+func loadAPIApp(ctx context.Context, path string, logging *platform.Logging, gatewayDB ...string) (*platform.App, error) {
 	if path == "" {
 		return nil, nil
 	}
@@ -38,6 +38,13 @@ func loadAPIApp(ctx context.Context, path string, logging *platform.Logging) (*p
 	cfg, err := platform.ParseConfig(raw)
 	if err != nil {
 		return nil, err
+	}
+	if len(gatewayDB) > 0 && gatewayDB[0] != "" {
+		revision, err := loadGatewayDocument(ctx, cfg, gatewayDB[0])
+		if err != nil {
+			return nil, err
+		}
+		logging.Logger.Info("gateway configuration loaded", "revision", revision)
 	}
 	app, err := platform.Assemble(ctx, platform.Options{Config: cfg, Logger: logging.Logger, Sink: logging.Sink(), Plugins: catalog()})
 	if err != nil {

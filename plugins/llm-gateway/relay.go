@@ -124,9 +124,19 @@ func NewGateway(cfg Config, providers map[string]*provider, ledger *Ledger, logg
 		gate:     newGate(cfg.Policy, logger),
 		logger:   logger,
 	}
+	disabledProviders := map[string]bool{}
+	for _, pc := range cfg.Providers {
+		disabledProviders[pc.ID] = !enabled(pc.Enabled)
+	}
 	for _, m := range cfg.Models {
+		if !enabled(m.Enabled) {
+			continue
+		}
 		g.kinds[m.Name], _ = m.operation()
 		for _, t := range m.Targets {
+			if disabledProviders[t.Provider] {
+				continue
+			}
 			p, ok := providers[t.Provider]
 			if !ok {
 				return nil, fmt.Errorf("llm-gateway: no runtime for provider %q", t.Provider)
@@ -144,7 +154,9 @@ func NewGateway(cfg Config, providers map[string]*provider, ledger *Ledger, logg
 				price:         snapshot(t.Price),
 			})
 		}
-		g.names = append(g.names, m.Name)
+		if len(g.models[m.Name]) > 0 {
+			g.names = append(g.names, m.Name)
+		}
 	}
 	return g, nil
 }

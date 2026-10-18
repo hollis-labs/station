@@ -49,6 +49,8 @@ The CLI is the operator/ops surface:
 - `station list [-config PATH]` — print every configured logical server:
   id, name, transport, and (for `inprocess`) its manifest-declared tool
   names, without spawning or dialing anything.
+- `station gateway-store` — import, stage, inspect and select SQLite gateway revisions.
+- `station client` — issue/list/revoke hashed credentials in YAML or a gateway database.
 - `station version` — print the build version.
 
 There's no management API and no MCP tools for operating Station
@@ -74,6 +76,118 @@ Use `station serve -api-only -api-config /absolute/path/to/api.yaml` to run
 only the HTTP API. No MCP config, demo server, or MCP listener is loaded.
 See [the adoption guide](docs/llm-gateway-adoption.md) for the local endpoint,
 per-app credentials, conversation headers, native API families, and live probes.
+
+## SQLite gateway state
+
+The optional SQLite store is the persistence foundation for the forthcoming LLM
+management API. It stores versioned gateway configuration (providers, ordered
+model routes/fallbacks, capabilities/prices, policy rules, budgets and catalog
+settings), hashed client identities/scopes, immutable revision history and an
+activation audit. Usage can share the same database via `ledger.store: sqlite`.
+Provider credentials and PostgreSQL DSNs remain secret references; resolved
+secrets are never imported. The models.dev download cache remains managed by the
+catalog library; per-call price snapshots are retained in the usage ledger.
+
+SQLite uses an application ID and transactional schema version, foreign keys,
+WAL, FULL synchronous writes and a bounded busy timeout. Use an absolute database
+path inside an existing owner-only directory on a local filesystem. Database
+files are created mode 0600; public files and symlinks are refused. Back up a live
+store with SQLite's backup API or `.backup`, not by copying just the main file
+while its WAL is open. A snapshot includes credential hashes and potentially
+captured usage details; keep it private.
+
+Import creates a **staged** revision without contacting providers or resolving
+secrets. For example, with an existing API configuration:
+
+```bash
+install -d -m 700 "$HOME/.local/state/station/gateway"
+DB="$HOME/.local/state/station/gateway/gateway.db"
+station gateway-store import -db "$DB" -api-config /private/api.yaml \
+  -expected 0 -actor operator
+station gateway-store status -db "$DB"
+station gateway-store activate -db "$DB" -revision 1 -expected 0 -actor operator
+station validate -api-only -api-config /private/api.yaml -gateway-db "$DB"
+```
+
+For a Cerberus-managed service, add `-gateway-db /absolute/path/gateway.db` to its
+serve arguments and deploy/reload through Cerberus. Standalone serve accepts the
+same flag. Startup reads one selected revision and logs its ID. Missing, corrupt,
+incompatible or unactivated databases fail startup; no YAML fallback occurs.
+The API bootstrap file still owns the listener, auth mode/JWT and other plugins,
+and must retain an `llm-gateway` block (it can be `{}`). Its gateway settings and
+client keys/keys_file are replaced by the selected revision. Auth must be enforced.
+
+To edit configuration, export a revision into a new private JSON file:
+
+```bash
+station gateway-store show -db "$DB" -output /private/gateway-edit.json
+# Edit the document, retaining schema_version: 1.
+station gateway-store stage -db "$DB" -input /private/gateway-edit.json \
+  -expected 1 -actor operator
+station gateway-store activate -db "$DB" -revision 2 -expected 1 -actor operator
+station validate -api-only -api-config /private/api.yaml -gateway-db "$DB"
+```
+
+`-expected` is the **latest** revision for import/stage/client edits and the
+**active** revision for activation. A stale value is rejected, including across
+processes. `history` lists revision metadata (`-before ID` paginates); `show
+-revision ID` exports a particular document. Unknown JSON fields, unsupported
+document versions, invalid references/rules/budgets and ambiguous client hashes
+are rejected before a revision is stored. The document is typed JSON, with
+snake_case fields matching the YAML configuration.
+
+Activation selects the revision for the **next startup**; it does not hot-reload
+the running gateway or prove credentials/upstreams work. Validate before reloading
+and run the existing gateway smoke probes afterward. To roll back, activate a
+previous revision with the current active ID as `-expected`, then validate/reload.
+Rollback restores client credentials too: an old revision can re-enable a
+revoked key. Usage records are independent of configuration rollback.
+
+Providers and model aliases accept `enabled: false` (default true). Disabled
+providers skip secret resolution/discovery and are removed from runtime targets;
+disabled aliases and aliases with no enabled targets are absent from model lists
+and cannot be invoked. Their definitions remain in the stored document for later
+re-enablement. Fallback and policy order survive storage unchanged.
+
+Client operations also stage revisions, preserving other pending configuration:
+
+```bash
+station client issue -gateway-db "$DB" -expected 2 -actor operator \
+  -id my-app -output /private/my-app.token \
+  -scopes llm-gateway.chat,llm-gateway.models.read
+station client list -gateway-db "$DB"
+station client revoke -gateway-db "$DB" -expected 3 -actor operator -id my-app
+```
+
+Use the returned revision ID for activation, then validate/reload. The list is
+from the latest revision and reports both latest and active IDs. Token material
+is only written to a new 0600 file, never stdout; SQLite retains SHA-256 hashes.
+Changes to the old YAML registry have no effect when `-gateway-db` is selected.
+
+For usage in the same SQLite file, select this ledger configuration in the
+stored document (or under the YAML plugin when not using managed configuration):
+
+```yaml
+ledger:
+  store: sqlite
+  sqlite:
+    path: /absolute/private/gateway.db
+  capture:
+    mode: off
+```
+
+Remove `ledger.postgres` settings when selecting SQLite. Existing PostgreSQL
+history is **not migrated automatically**; changing the backend starts reading
+that backend's records, affecting usage reports and budget counters. Preserve
+and migrate historical entries before a live cutover. SQLite uses the same
+bounded asynchronous usage writer as PostgreSQL: committed batches are atomic
+and idempotent, but queued records can still be lost on crash/overflow.
+
+HTTP management editing endpoints and hot application of changes are subsequent
+work. Their initial access will use the portfolio `Authorization: Bearer` pattern
+and dedicated management scopes through the shared auth library. Existing chat
+credentials should receive only inference/model-read scopes; they do not need
+management authority. No new HTTP management routes are exposed by this step.
 
 ## Plugin platform and the LLM gateway
 
@@ -123,7 +237,8 @@ outcome, tokens, cost) and `llm.refused` for what the gateway turns away.
 Prompts and completions are never written to stderr logs. Flags: `-log-format`, `-log-level`.
 
 Ledger: every call (and every failed-over attempt) is an entry with identity,
-routing, outcome, disjoint usage, price snapshot and cost. `ledger.store: postgres`
+routing, outcome, disjoint usage, price snapshot and cost. `ledger.store: sqlite`
+uses the gateway SQLite database described above. `ledger.store: postgres`
 makes it durable: an idempotent, migrated `llm_calls` table in a database and role
 dedicated to it, written off the request path through a bounded queue with retry. If
 the database is down, calls still succeed, entries wait and retry, and a dropped

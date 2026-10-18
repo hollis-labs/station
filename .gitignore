@@ -43,3 +43,8 @@ lefthook.yml
 # Python verification tools
 __pycache__/
 *.pyc
+
+# Local gateway state (includes client hashes and usage)
+*.db
+*.db-wal
+*.db-shm

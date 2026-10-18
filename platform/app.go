@@ -63,9 +63,9 @@ type JWTConfig struct {
 // KeyConfig is one static API key. The raw key is never stored; produce the
 // hash with `printf %s "$KEY" | sha256sum`.
 type KeyConfig struct {
-	ID     string   `yaml:"id"`
-	SHA256 string   `yaml:"sha256"`
-	Scopes []string `yaml:"scopes"`
+	ID     string   `yaml:"id" json:"id"`
+	SHA256 string   `yaml:"sha256" json:"sha256"`
+	Scopes []string `yaml:"scopes" json:"scopes"`
 }
 
 var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
