@@ -74,8 +74,12 @@ func (s *sqliteStore) Recent(ctx context.Context, q Query) ([]Entry, error) {
 	if limit <= 0 {
 		limit = 1000
 	}
-	args = append(args, limit)
-	rows, err := s.state.db.QueryContext(ctx, "SELECT entry FROM (SELECT entry,recorded_at,id FROM gateway_usage"+w+" ORDER BY recorded_at DESC,id DESC LIMIT ?) ORDER BY recorded_at,id", args...)
+	limitSQL := ""
+	if q.Limit != -1 {
+		args = append(args, limit)
+		limitSQL = " LIMIT ?"
+	}
+	rows, err := s.state.db.QueryContext(ctx, "SELECT entry FROM (SELECT entry,recorded_at,id FROM gateway_usage"+w+" ORDER BY recorded_at DESC,id DESC"+limitSQL+") ORDER BY recorded_at,id", args...)
 	if err != nil {
 		return nil, err
 	}

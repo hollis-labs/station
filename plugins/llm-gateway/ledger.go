@@ -81,6 +81,8 @@ type Total struct {
 
 // Query selects ledger entries. Zero fields select everything.
 type Query struct {
+	// Limit is the read cap; -1 requests the complete retained history for internal budget seeding.
+	// The HTTP usage endpoint accepts only bounded positive limits.
 	Limit     int
 	Principal string
 	Since     time.Time

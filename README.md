@@ -265,13 +265,26 @@ audit report.
 
 Budgets and local routes: `budgets` uses `llm/core/quota` (`SeededStore` + `Limiter`)
 over `day`, `week`, `month` or rolling windows, scoped by `total` or verified
-`principal` (`max_usd` and/or `max_requests`), seeded from the ledger on startup
-and updated live on every call. Spend math stays in `quota` and passes `budget_state`
-(`ok` or `exhausted`) and `exhausted_budgets` as facts into the `llm.invoke` policy
-decision (`CW-20261010-0030`): shadow mode logs `would_block=true` without changing
-routing, while enforce mode returns `429 budget_exceeded` with `Retry-After` (unless
-a rule such as `budget_state: exhausted, tag: free, effect: allow` permits a free
-local target). Targets carry `tags` (`local`, `free`, `paid`) and `best_effort: true`
+`principal` (`max_usd` and/or `max_requests`), seeded on first use
+from the ledger's complete retained window (not the usage API's recent-page limit),
+and updated when each dispatched attempt finishes, including failed, interrupted
+and canceled attempts. Configured budgets are enforced independently of policy
+mode or ordered allow rules: exhaustion returns `429 budget_exceeded` with
+`Retry-After` when known. Counter/history failures return `503 budget_unavailable`.
+Missing or partial cost in a matching spend window returns
+`503 budget_cost_unknown`; a known zero cost remains free. These checks also run
+before fallback attempts. A `free` tag or policy allow rule cannot bypass them;
+use budget model filters to exclude a separate local alias when appropriate.
+
+Rates are captured before each upstream attempt. Concurrent catalog refreshes
+cannot change that attempt's price, including an initially unknown price. These
+are still checks over completed usage, not reserved capacity: concurrent calls,
+in-flight work at a crash, and a single call larger than the remaining spend can
+overshoot. Durable reservation/reconciliation remains CW-20261017-0021. Usage
+summary totals still aggregate successful calls; budget counters also include
+other outcomes. They are intentionally different views.
+
+Targets carry `tags` (`local`, `free`, `paid`) and `best_effort: true`
 (`CW-20261011-0099`: fast 1.5s header timeout + threshold-1 breaker so a sleeping or
 rebooting tailnet llama host fails over in milliseconds and is skipped while open),
 and `GET /v1/models` exposes `kind`, `reachable`, `tags` and per-target breaker state.

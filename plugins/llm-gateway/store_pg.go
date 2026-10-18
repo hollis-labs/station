@@ -179,11 +179,15 @@ func (s *pgStore) Recent(ctx context.Context, q Query) ([]Entry, error) {
 	if limit <= 0 {
 		limit = 1000
 	}
-	args = append(args, limit)
+	limitSQL := ""
+	if q.Limit != -1 {
+		args = append(args, limit)
+		limitSQL = fmt.Sprintf(" LIMIT $%d", len(args))
+	}
 	rows, err := s.pool.Query(ctx, fmt.Sprintf(`SELECT id, recorded_at, request_id, principal, verified, operation, dialect,
 		alias, provider, model, status, outcome, streamed, latency_ms, usage, price, cost_kind, cost_usd, cost_partial, detail, conversation_id
-		FROM (SELECT * FROM llm_calls%s ORDER BY recorded_at DESC, id DESC LIMIT $%d) recent
-		ORDER BY recorded_at, id`, w, len(args)), args...)
+		FROM (SELECT * FROM llm_calls%s ORDER BY recorded_at DESC, id DESC%s) recent
+		ORDER BY recorded_at, id`, w, limitSQL), args...)
 	if err != nil {
 		return nil, fmt.Errorf("query ledger: %w", err)
 	}

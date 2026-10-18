@@ -13,14 +13,16 @@ import (
 const (
 	unitUSDMicros quota.Unit = "usd_micros"
 	unitRequests  quota.Unit = "requests"
+	unitUnpriced  quota.Unit = "unpriced_calls"
 )
 
 // BudgetStatus is the result of checking every configured budget that applies
 // to a call. Spend math and windows live here in the quota module; policy
 // receives this summary as facts on llm.invoke.
 type BudgetStatus struct {
-	// State is "ok" or "exhausted".
-	State string
+	// State is "ok", "exhausted", or "unknown" (incomplete spend history).
+	State   string
+	Unknown []string
 	// Exhausted lists the IDs of budgets that refused the call.
 	Exhausted []string
 	// RetryAfter is the longest wait among exhausted budgets.
@@ -82,8 +84,9 @@ type Budgets struct {
 	seeded  *quota.SeededStore
 	limiter *quota.Limiter
 
-	mu   sync.Mutex
-	seen map[string]bool
+	mu      sync.Mutex
+	seen    map[string]bool
+	failure error
 }
 
 func parseBudgetWindow(raw string) (quota.Window, time.Duration, error) {
@@ -117,6 +120,9 @@ func usdToMicros(usd float64) int64 {
 // NewBudgets compiles cfg and binds a quota.Limiter backed by a SeededStore
 // that reads historical entries from store on first check.
 func NewBudgets(cfgs []BudgetConfig, store Store, clock quota.Clock) (*Budgets, error) {
+	if err := validateBudgets(cfgs); err != nil {
+		return nil, err
+	}
 	if clock == nil {
 		clock = quota.ClockFunc(func() time.Time { return time.Now().UTC() })
 	}
@@ -144,10 +150,13 @@ func NewBudgets(cfgs []BudgetConfig, store Store, clock quota.Clock) (*Budgets, 
 		seen:  map[string]bool{},
 	}
 	seedFn := func(ctx context.Context, since time.Time) ([]quota.SeedEntry, error) {
-		if store == nil || len(b.items) == 0 {
+		if len(b.items) == 0 {
 			return nil, nil
 		}
-		entries, err := store.Recent(ctx, Query{Since: since})
+		if store == nil {
+			return nil, fmt.Errorf("budget history store unavailable")
+		}
+		entries, err := store.Recent(ctx, Query{Since: since, Limit: -1})
 		if err != nil {
 			return nil, err
 		}
@@ -171,9 +180,6 @@ func NewBudgets(cfgs []BudgetConfig, store Store, clock quota.Clock) (*Budgets, 
 }
 
 func (b *Budgets) entriesFor(e Entry) []quota.SeedEntry {
-	if e.Outcome != OutcomeOK {
-		return nil
-	}
 	callerID := e.Row.SessionID
 	if callerID == "" {
 		callerID = "anonymous"
@@ -187,7 +193,10 @@ func (b *Budgets) entriesFor(e Entry) []quota.SeedEntry {
 		if !item.matches(callerID, e.Alias) {
 			continue
 		}
-		if item.maxMicros > 0 && e.CostUSD != nil && *e.CostUSD > 0 {
+		if item.maxMicros > 0 && (e.CostUSD == nil || e.CostPartial || !validBudgetUSD(*e.CostUSD)) {
+			out = append(out, quota.SeedEntry{Counter: item.unknownLimit(callerID).Counter(), Entry: quota.Entry{At: at, Amount: 1}})
+		}
+		if item.maxMicros > 0 && e.CostUSD != nil && validBudgetUSD(*e.CostUSD) && *e.CostUSD > 0 {
 			out = append(out, quota.SeedEntry{
 				Counter: item.usdLimit(callerID).Counter(),
 				Entry:   quota.Entry{At: at, Amount: usdToMicros(*e.CostUSD)},
@@ -205,33 +214,42 @@ func (b *Budgets) entriesFor(e Entry) []quota.SeedEntry {
 
 // Record updates in-memory budget counters immediately when a call finishes so
 // subsequent checks see the spend without waiting for async store flushes.
-func (b *Budgets) Record(e Entry) {
-	if b == nil || len(b.items) == 0 || e.Outcome != OutcomeOK {
-		return
+func (b *Budgets) Record(e Entry) error {
+	if b == nil || len(b.items) == 0 {
+		return nil
 	}
 	b.mu.Lock()
 	if e.ID != "" {
 		if b.seen[e.ID] {
 			b.mu.Unlock()
-			return
+			return nil
 		}
 		b.seen[e.ID] = true
 	}
 	seeds := b.entriesFor(e)
 	b.mu.Unlock()
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	for _, s := range seeds {
-		_ = b.seeded.Record(ctx, s.Counter, s.Entry)
+		if err := b.seeded.Record(ctx, s.Counter, s.Entry); err != nil {
+			// A partially applied record cannot safely be retried. Stop admission
+			// until restart reconstructs every counter from durable history.
+			b.mu.Lock()
+			b.failure = err
+			b.mu.Unlock()
+			return err
+		}
 	}
+	return nil
 }
 
 // Check evaluates all budgets matching caller and model, returning the
 // combined budget_state facts for policy admission.
-func (b *Budgets) Check(ctx context.Context, caller Caller, model string) BudgetStatus {
+func (b *Budgets) Check(ctx context.Context, caller Caller, model string) (BudgetStatus, error) {
 	status := BudgetStatus{State: "ok"}
 	if b == nil || len(b.items) == 0 {
-		return status
+		return status, nil
 	}
 	callerID := caller.ID
 	if !caller.Known || callerID == "" {
@@ -241,25 +259,42 @@ func (b *Budgets) Check(ctx context.Context, caller Caller, model string) Budget
 		if !item.matches(callerID, model) {
 			continue
 		}
+		b.mu.Lock()
+		failure := b.failure
+		b.mu.Unlock()
+		if failure != nil {
+			return status, failure
+		}
 		exhausted := false
 		if item.maxMicros > 0 {
+			unknown, err := b.limiter.Check(ctx, item.unknownLimit(callerID), 1)
+			if err != nil {
+				return status, err
+			}
+			if !unknown.Allowed {
+				status.Unknown = append(status.Unknown, item.cfg.ID)
+			}
 			dec, err := b.limiter.Check(ctx, item.usdLimit(callerID), 1)
-			if err == nil {
-				remUSD := float64(dec.Remaining) / 1e6
-				if status.RemainingUSD == nil || remUSD < *status.RemainingUSD {
-					status.RemainingUSD = &remUSD
-				}
-				if !dec.Allowed {
-					exhausted = true
-					if dec.RetryAfter > status.RetryAfter {
-						status.RetryAfter = dec.RetryAfter
-					}
+			if err != nil {
+				return status, err
+			}
+			remUSD := float64(dec.Remaining) / 1e6
+			if status.RemainingUSD == nil || remUSD < *status.RemainingUSD {
+				status.RemainingUSD = &remUSD
+			}
+			if !dec.Allowed {
+				exhausted = true
+				if dec.RetryAfter > status.RetryAfter {
+					status.RetryAfter = dec.RetryAfter
 				}
 			}
 		}
 		if item.maxReqs > 0 {
 			dec, err := b.limiter.Check(ctx, item.reqLimit(callerID), 1)
-			if err == nil && !dec.Allowed {
+			if err != nil {
+				return status, err
+			}
+			if !dec.Allowed {
 				exhausted = true
 				if dec.RetryAfter > status.RetryAfter {
 					status.RetryAfter = dec.RetryAfter
@@ -271,5 +306,18 @@ func (b *Budgets) Check(ctx context.Context, caller Caller, model string) Budget
 			status.Exhausted = append(status.Exhausted, item.cfg.ID)
 		}
 	}
-	return status
+	if len(status.Unknown) > 0 && status.State != "exhausted" {
+		status.State = "unknown"
+	}
+	return status, nil
+}
+
+// A single unknown/partial cost makes a matching spend window incomplete.
+// Keeping these events in quota gives them the same window expiry as spend.
+func (b compiledBudget) unknownLimit(callerID string) quota.Limit {
+	return quota.Limit{Key: b.key(callerID), Unit: unitUnpriced, Window: b.window, Max: 1}
+}
+
+func validBudgetUSD(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0 && v < float64(math.MaxInt64)/1e6
 }

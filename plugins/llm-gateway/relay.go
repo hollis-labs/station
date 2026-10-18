@@ -179,12 +179,11 @@ func (g *Gateway) record(rec Record) {
 	if g.ledger == nil {
 		return
 	}
-	if rec.Price == nil && g.catalog != nil {
-		rec.Price = g.catalog.ResolvePrice(rec.Target)
-	}
 	e := g.ledger.Add(rec)
 	if g.budgets != nil {
-		g.budgets.Record(e)
+		if err := g.budgets.Record(e); err != nil {
+			g.logger.Error("budget.record_failed", "request_id", rec.RequestID)
+		}
 	}
 }
 
@@ -290,7 +289,10 @@ func (g *Gateway) relay(w http.ResponseWriter, r *http.Request, d Dialect, op Op
 		g.refuse(w, d, caller, requestID, meta.Model, http.StatusNotFound, "model_not_found", "the requested model does not exist")
 		return
 	}
-	bstat := g.budgets.Check(r.Context(), caller, meta.Model)
+	bstat, allowed := g.checkBudget(w, r, d, caller, requestID, meta.Model)
+	if !allowed {
+		return
+	}
 	if !g.gate.hasTargetRules {
 		if ok, refusal := g.gate.check(r.Context(), caller, requestID, op, meta, nil, bstat); !ok {
 			if refusal.retryAfter > 0 {
@@ -333,6 +335,13 @@ func (g *Gateway) relay(w http.ResponseWriter, r *http.Request, d Dialect, op Op
 		lastErr error
 	)
 	for i, t := range targets {
+		// A failed attempt may consume the last request or leave unknown spend.
+		// Recheck before dispatching a fallback, not only before the first attempt.
+		if i > 0 {
+			if _, allowed := g.checkBudget(w, r, d, caller, requestID, meta.Model); !allowed {
+				return
+			}
+		}
 		last := i == len(targets)-1
 		tguard := g.guardFor(t)
 		ticket, dec := tguard.Admit(guard.Key{Resource: t.provider.id, Model: t.model})
@@ -402,6 +411,15 @@ func (g *Gateway) relay(w http.ResponseWriter, r *http.Request, d Dialect, op Op
 		// The meter must read plain bytes.
 		req.Header.Set("Accept-Encoding", "identity")
 
+		// Freeze this attempt's rates, including an absent price. Catalog refreshes
+		// during the request must not rewrite the cost of work already dispatched.
+		attempt := *t
+		attempt.price = g.catalog.ResolvePrice(t)
+		if attempt.price != nil {
+			price := *attempt.price
+			attempt.price = &price
+		}
+		t = &attempt
 		resp, err := t.provider.client.Do(req)
 		if headerTimer != nil {
 			headerTimer.Stop()
@@ -415,7 +433,9 @@ func (g *Gateway) relay(w http.ResponseWriter, r *http.Request, d Dialect, op Op
 			}
 			class := ticket.Done(err)
 			if r.Context().Err() != nil {
-				return // the client left; nobody to answer
+				g.record(Record{Caller: caller, RequestID: requestID, Alias: meta.Model, Operation: op, Dialect: d.Name(), Target: t,
+					Outcome: OutcomeCanceled, Streamed: meta.Stream, Latency: time.Since(start)})
+				return // the client left; the dispatched attempt still counts
 			}
 			g.logger.Warn("target failed", "request_id", requestID, "provider", t.provider.id, "model", t.model, "class", class.String(), "err", err)
 			g.record(Record{Caller: caller, RequestID: requestID, Alias: meta.Model, Operation: op, Dialect: d.Name(), Target: t,
@@ -908,4 +928,22 @@ func (g *Gateway) UsageHandler() http.Handler {
 		}
 		writeJSON(w, http.StatusOK, out)
 	})
+}
+
+// checkBudget enforces configured budgets independently of policy evaluation.
+func (g *Gateway) checkBudget(w http.ResponseWriter, r *http.Request, d Dialect, caller Caller, requestID, model string) (BudgetStatus, bool) {
+	status, err := g.budgets.Check(r.Context(), caller, model)
+	if err != nil {
+		g.refuse(w, d, caller, requestID, model, http.StatusServiceUnavailable, "budget_unavailable", "usage budget could not be evaluated")
+		return status, false
+	}
+	if status.State != "ok" {
+		refusal := budgetRefusal(status)
+		if refusal.retryAfter > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(refusal.retryAfter))
+		}
+		g.refuse(w, d, caller, requestID, model, refusal.status, refusal.code, refusal.message)
+		return status, false
+	}
+	return status, true
 }

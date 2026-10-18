@@ -147,7 +147,8 @@ type BudgetConfig struct {
 	Window string `yaml:"window" json:"window"`
 	// MaxUSD caps estimated spend in US dollars over Window.
 	MaxUSD float64 `yaml:"max_usd" json:"max_usd"`
-	// MaxRequests caps call count over Window.
+	// MaxRequests limits recorded upstream attempts over Window, including
+	// failures and cancellations. In-flight capacity is not yet reserved.
 	MaxRequests int64 `yaml:"max_requests" json:"max_requests"`
 }
 
@@ -467,8 +468,8 @@ func validateBudgets(bs []BudgetConfig) error {
 		if _, _, err := parseBudgetWindow(b.Window); err != nil {
 			return fmt.Errorf("llm-gateway: budget %q: %w", b.ID, err)
 		}
-		if b.MaxUSD < 0 || b.MaxRequests < 0 || (b.MaxUSD == 0 && b.MaxRequests == 0) {
-			return fmt.Errorf("llm-gateway: budget %q: set a positive max_usd and/or max_requests", b.ID)
+		if !validBudgetUSD(b.MaxUSD) || b.MaxRequests < 0 || (b.MaxUSD == 0 && b.MaxRequests == 0) {
+			return fmt.Errorf("llm-gateway: budget %q: set a finite, representable positive max_usd and/or positive max_requests", b.ID)
 		}
 		for _, g := range []string{b.Principal, b.Model} {
 			if _, err := path.Match(g, ""); err != nil {

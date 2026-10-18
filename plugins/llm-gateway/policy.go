@@ -85,6 +85,9 @@ func (r policyRefusal) write(w http.ResponseWriter, d Dialect) {
 // budget_state facts from the quota evaluator. It returns (true, zero) when
 // admitted, or (false, refusal) when blocked.
 func (g *gate) check(ctx context.Context, caller Caller, requestID string, op Operation, meta Meta, t *target, bstat BudgetStatus) (bool, policyRefusal) {
+	if bstat.State != "" && bstat.State != "ok" {
+		return false, budgetRefusal(bstat)
+	}
 	if bstat.State == "" {
 		bstat.State = "ok"
 	}
@@ -274,4 +277,12 @@ func (a slogAudit) Record(_ context.Context, ev policy.AuditEvent) error {
 		"admission", string(ev.ProposedAdmission), "would_block", ev.WouldBlock, "matched", matched,
 		"failure", string(ev.Failure))
 	return nil
+}
+
+// Budget refusal cannot be relaxed by policy shadow mode or an allow rule.
+func budgetRefusal(s BudgetStatus) policyRefusal {
+	if s.State == "exhausted" {
+		return policyRefusal{status: http.StatusTooManyRequests, code: "budget_exceeded", message: "usage budget exceeded", retryAfter: int(math.Ceil(s.RetryAfter.Seconds()))}
+	}
+	return policyRefusal{status: http.StatusServiceUnavailable, code: "budget_cost_unknown", message: "usage budget has incomplete cost history"}
 }

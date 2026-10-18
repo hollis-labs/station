@@ -161,13 +161,20 @@ unknown values.
 | Diagnostics/telemetry | CW-20261017-0022 | Usage components, correlation, queue/persistence health |
 | Activity events | CW-20261017-0023 | Workflow/lifecycle facts, separate from telemetry |
 
-Budget enforcement currently checks before execution without reserving capacity,
-counts successful outcomes, and ignores some counter errors. An earlier allow
-rule can also bypass the later exhausted-budget rule. These are correctness gaps,
-not hard spend guarantees. Rate snapshots are currently resolved at completion,
-so a concurrent catalog refresh can change the rate used for a call. The budget
-task owns fixing admission, snapshot timing, reconciliation and durable restart
-behavior together.
+Budget seeding reads the full retained ledger window rather than only the newest
+1,000 entries. Budget admission is independent of policy allow rules and shadow mode. Counter
+failures fail closed, all dispatched outcomes count toward request budgets, and
+reported costs from canceled/interrupted attempts contribute to spend. Missing
+or partial historical cost blocks the matching spend window; known zero remains
+free. Prices are captured before each attempt, including an unknown price.
+
+Durable reservations and reconciliation remain open in CW-20261017-0021. Checks
+still run over completed usage; they do not reserve in-flight capacity or bound
+an individual call's spend. Concurrent calls can overshoot, and a crash can lose
+unfinished work or buffered history. Unknown-price admission before any usage,
+complete attempt metering, and cross-process accounting remain part of that work.
+Usage totals retain their successful-call contract; budget counters count all
+recorded attempts. None of these costs is a subscription debit or provider bill.
 
 Effective target capability flags still use booleans with permissive defaults for
 uncataloged models. The catalog-match flag exposes missing data but does not yet
