@@ -2,6 +2,7 @@ package llmgateway
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -29,6 +30,13 @@ func (s *sqliteStore) Add(ctx context.Context, entries ...Entry) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := addSQLite(ctx, tx, entries...); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func addSQLite(ctx context.Context, tx *sql.Tx, entries ...Entry) error {
 	for _, e := range entries {
 		if e.ID == "" || e.Row.RecordedAt.IsZero() {
 			return errors.New("ledger entry requires ID and timestamp")
@@ -45,7 +53,7 @@ VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING`, e.ID, e.Row.RecordedAt.
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func sqliteWhere(q Query, extra string) (string, []any) {
@@ -53,6 +61,10 @@ func sqliteWhere(q Query, extra string) (string, []any) {
 	var args []any
 	if extra != "" {
 		clauses = append(clauses, extra)
+	}
+	if q.ID != "" {
+		clauses = append(clauses, "id=?")
+		args = append(args, q.ID)
 	}
 	if q.Principal != "" {
 		clauses = append(clauses, "principal=?")
@@ -69,6 +81,14 @@ func sqliteWhere(q Query, extra string) (string, []any) {
 }
 
 func (s *sqliteStore) Recent(ctx context.Context, q Query) ([]Entry, error) {
+	return recentSQLite(ctx, s.state.db, q)
+}
+
+type sqliteReader interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func recentSQLite(ctx context.Context, db sqliteReader, q Query) ([]Entry, error) {
 	w, args := sqliteWhere(q, "")
 	limit := q.Limit
 	if limit <= 0 {
@@ -79,7 +99,7 @@ func (s *sqliteStore) Recent(ctx context.Context, q Query) ([]Entry, error) {
 		args = append(args, limit)
 		limitSQL = " LIMIT ?"
 	}
-	rows, err := s.state.db.QueryContext(ctx, "SELECT entry FROM (SELECT entry,recorded_at,id FROM gateway_usage"+w+" ORDER BY recorded_at DESC,id DESC"+limitSQL+") ORDER BY recorded_at,id", args...)
+	rows, err := db.QueryContext(ctx, "SELECT entry FROM (SELECT entry,recorded_at,id FROM gateway_usage"+w+" ORDER BY recorded_at DESC,id DESC"+limitSQL+") ORDER BY recorded_at,id", args...)
 	if err != nil {
 		return nil, err
 	}

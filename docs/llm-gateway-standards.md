@@ -152,29 +152,36 @@ unknown values.
 | Shared HTTP/MCP catalog and estimates | CW-20261018-0024 | Versioned DTOs, filtering/pagination, future sources, estimate completeness |
 | Native API and stateful route conformance | CW-20261018-0025 | Protocol coverage, operation metadata, account affinity |
 | Policy explanation and trusted facts | CW-20261018-0026 | Same decision path for preflight/enforcement; capabilities, privacy and budgets |
-| SQLite-managed deployment | CW-20261018-0027 | Deploy merged management APIs; retain live PostgreSQL history |
+| SQLite-managed deployment | CW-20261018-0027 | Complete: live management verified; PostgreSQL usage retained |
 | Discovery API-family validation | CW-20261017-0011 | Existing task; explicit routes already avoid mixed-family discovery |
 | Provider headers | CW-20261017-0013 | Existing task; auth/version/workspace/beta headers and precedence |
 | Unknown capabilities/readiness | CW-20261017-0019 | Warmup is implemented; uncataloged capabilities still default permissively |
 | Versioned configuration/conformance | CW-20261017-0020 | Management document version exists; exported schema and reusable probes remain |
-| Budget/accounting correctness | CW-20261017-0021 | Priority 1: reservations, counter failures, failed-but-billable calls, unknown spend |
+| Budget/accounting correctness | CW-20261017-0021 | Durable request admission implemented; per-call USD bounds, complete metering and recovery remain |
 | Diagnostics/telemetry | CW-20261017-0022 | Usage components, correlation, queue/persistence health |
 | Activity events | CW-20261017-0023 | Workflow/lifecycle facts, separate from telemetry |
 
 Budget seeding reads the full retained ledger window rather than only the newest
-1,000 entries. Budget admission is independent of policy allow rules and shadow mode. Counter
-failures fail closed, all dispatched outcomes count toward request budgets, and
+1,000 entries. Budget admission is independent of policy allow rules and shadow
+mode. Counter failures fail closed, all dispatched outcomes count toward request budgets, and
 reported costs from canceled/interrupted attempts contribute to spend. Missing
 or partial historical cost blocks the matching spend window; known zero remains
 free. Prices are captured before each attempt, including an unknown price.
 
-Durable reservations and reconciliation remain open in CW-20261017-0021. Checks
-still run over completed usage; they do not reserve in-flight capacity or bound
-an individual call's spend. Concurrent calls can overshoot, and a crash can lose
-unfinished work or buffered history. Unknown-price admission before any usage,
-complete attempt metering, and cross-process accounting remain part of that work.
-Usage totals retain their successful-call contract; budget counters count all
-recorded attempts. None of these costs is a subscription debit or provider bill.
+With budgets configured, SQL admission now atomically checks the full window and
+persists a reservation before dispatch. Completion replaces it with usage in one
+transaction, bypassing the asynchronous queue. Requests count in their admission
+window across processes/restarts; crashes leave outstanding rows counted. A pending
+or incomplete cost blocks another matching spend attempt until settlement or window
+expiry. These rows remain inspectable as `outcome: reserved` in usage reads.
+
+CW-20261017-0021 still owns priced per-call bounds, unknown-price admission before
+any usage, complete attempt metering and operator/provider-assisted reconciliation.
+A single call can exceed remaining dollars; this is not yet a hard spend ceiling.
+All workers must use the reservation path and consistent budget configuration.
+Memory storage is single-process only and stops budgeted admission at capacity.
+Usage totals retain their successful-call contract; budget counters also count
+outstanding and failed attempts. No costs here are subscription debits or bills.
 
 Effective target capability flags still use booleans with permissive defaults for
 uncataloged models. The catalog-match flag exposes missing data but does not yet

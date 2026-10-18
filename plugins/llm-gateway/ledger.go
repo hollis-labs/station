@@ -14,6 +14,7 @@ import (
 
 // Outcomes recorded in the ledger.
 const (
+	OutcomeReserved    = "reserved" // admitted durably; outcome not yet reconciled
 	OutcomeOK          = "ok"
 	OutcomeUpstreamErr = "upstream_error" // the upstream answered with an error status; relayed as is
 	OutcomeFailedOver  = "failed_over"    // this attempt failed and the next target was tried
@@ -81,6 +82,7 @@ type Total struct {
 
 // Query selects ledger entries. Zero fields select everything.
 type Query struct {
+	ID string // internal exact-entry lookup; not exposed by the HTTP query parser
 	// Limit is the read cap; -1 requests the complete retained history for internal budget seeding.
 	// The HTTP usage endpoint accepts only bounded positive limits.
 	Limit     int
@@ -165,12 +167,29 @@ func (l *Ledger) Add(rec Record) Entry {
 		e.CostUSD, e.CostPartial = &total, c.Partial()
 	}
 	e.Row = row
+	if rec.Target.reservation != nil {
+		// Keep the attempt in its admission window, including across a restart.
+		e.ID = rec.Target.reservation.ID
+		e.Row.RecordedAt = rec.Target.reservation.Row.RecordedAt
+		e.Row.SessionID = rec.Target.reservation.Row.SessionID
+	}
 	l.log(e)
 	// The caller's request has been answered; the write gets its own bounded
 	// context rather than the request's, which may already be cancelled.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := l.store.Add(ctx, e); err != nil {
+	var err error
+	if rec.Target.reservation != nil {
+		journal, ok := l.store.(reservationStore)
+		if !ok {
+			err = errReservationStore
+		} else {
+			err = journal.Settle(ctx, e)
+		}
+	} else {
+		err = l.store.Add(ctx, e)
+	}
+	if err != nil {
 		l.logger.Error("ledger.write_failed", "request_id", e.RequestID, "entry_id", e.ID, "err", err)
 	}
 	return e

@@ -147,8 +147,8 @@ type BudgetConfig struct {
 	Window string `yaml:"window" json:"window"`
 	// MaxUSD caps estimated spend in US dollars over Window.
 	MaxUSD float64 `yaml:"max_usd" json:"max_usd"`
-	// MaxRequests limits recorded upstream attempts over Window, including
-	// failures and cancellations. In-flight capacity is not yet reserved.
+	// MaxRequests limits admitted upstream attempts over Window, including
+	// in-flight work, failures and cancellations. Admission time owns the window.
 	MaxRequests int64 `yaml:"max_requests" json:"max_requests"`
 }
 
