@@ -85,6 +85,38 @@ func TestAuthEnforcedByDefault(t *testing.T) {
 	}
 }
 
+func TestAssemblyFailureReleasesPluginResources(t *testing.T) {
+	for _, mode := range []string{"plugin_failure", "auth_failure"} {
+		t.Run(mode, func(t *testing.T) {
+			cfg, err := ParseConfig([]byte("auth: {mode: invalid}\nplugins: {demo: {}}\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			stopped := false
+			plugin := &testPlugin{name: "demo", scope: "demo.read", register: func(reg *PluginRegistry) error {
+				reg.OnStop(func(ctx context.Context) error {
+					if ctx.Err() != nil {
+						t.Error("cleanup context already cancelled")
+					}
+					stopped = true
+					return nil
+				})
+				if mode == "plugin_failure" {
+					return io.ErrUnexpectedEOF
+				}
+				return nil
+			}}
+			if app, err := Assemble(t.Context(), Options{Config: cfg, Logger: quiet, Plugins: []Plugin{plugin}}); err == nil {
+				app.Close(t.Context())
+				t.Fatal("invalid assembly succeeded")
+			}
+			if !stopped {
+				t.Fatal("failed assembly leaked plugin resources")
+			}
+		})
+	}
+}
+
 func TestScopeIsRequiredPerRoute(t *testing.T) {
 	app := mustAssemble(t, authYAML("other.read"), &testPlugin{name: "demo", scope: "demo.read"})
 	if rec := do(app, "GET", "/api/demo/ping", "secret"); rec.Code != http.StatusForbidden {

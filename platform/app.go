@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/hollis-labs/libs/app/app-host/host"
 	"github.com/hollis-labs/libs/security/auth"
@@ -125,6 +126,18 @@ func Assemble(ctx context.Context, opts Options) (*App, error) {
 		cfg.MaxBodyBytes = 4 << 20
 	}
 	reg := NewRegistry(logger)
+	// Registration may open databases and start plugin workers. If a later
+	// plugin or auth validation fails, release every registered resource.
+	assembled := false
+	defer func() {
+		if !assembled {
+			cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			for i := len(reg.stops) - 1; i >= 0; i-- {
+				_ = reg.stops[i](cleanup)
+			}
+		}
+	}()
 	if ss, ok := opts.Sink.(scopeSink); ok && ss.s != nil {
 		reg.scope = ss.s
 	}
@@ -217,6 +230,7 @@ func Assemble(ctx context.Context, opts Options) (*App, error) {
 		return nil, err
 	}
 	a.host = h
+	assembled = true
 	return a, nil
 }
 

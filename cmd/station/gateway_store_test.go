@@ -31,7 +31,7 @@ func TestManagedGatewayCLIAndRestart(t *testing.T) {
 		fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"OK"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`)
 	}))
 	defer up.Close()
-	if err := os.WriteFile(keys, []byte(fmt.Sprintf("- {id: app, sha256: %x, scopes: [llm-gateway.chat, llm-gateway.models.read]}\n", sha256.Sum256([]byte("test-key")))), 0600); err != nil {
+	if err := os.WriteFile(keys, []byte(fmt.Sprintf("- {id: app, sha256: %x, scopes: [llm-gateway.chat, llm-gateway.models.read, llm-gateway.management.read]}\n", sha256.Sum256([]byte("test-key")))), 0600); err != nil {
 		t.Fatal(err)
 	}
 	bootstrap := fmt.Sprintf(`listen: 127.0.0.1:0
@@ -81,6 +81,9 @@ plugins:
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		return w
+	}
+	if w := send(app.Handler(), "test-key", "GET", "management/status", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"running_revision":1`) {
+		t.Fatalf("management was not wired to loaded revision: %d %s", w.Code, w.Body.String())
 	}
 	if got := send(app.Handler(), "", "GET", "models", "").Code; got != 401 {
 		t.Fatalf("missing credential: %d", got)

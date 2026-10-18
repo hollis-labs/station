@@ -4,6 +4,11 @@ Station's local dogfood gateway serves API-powered agents and tools. MCP is not
 involved. Application adoption and launch/evaluation configuration are tracked
 separately in CW-20261017-0032; this guide describes the Station contract.
 
+Operator integrations such as Tachyon use the separate
+[management API contract](llm-gateway-management.md). Those routes require a
+SQLite-managed deployment and dedicated management scopes; the existing live
+YAML deployment and ordinary inference credentials do not expose them.
+
 ## Endpoint and access
 
 - HTTPS API root: `https://llm.nanite.cloud/api/llm-gateway/v1`.

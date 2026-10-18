@@ -39,14 +39,16 @@ func loadAPIApp(ctx context.Context, path string, logging *platform.Logging, gat
 	if err != nil {
 		return nil, err
 	}
+	plugins := catalog()
 	if len(gatewayDB) > 0 && gatewayDB[0] != "" {
 		revision, err := loadGatewayDocument(ctx, cfg, gatewayDB[0])
 		if err != nil {
 			return nil, err
 		}
 		logging.Logger.Info("gateway configuration loaded", "revision", revision)
+		plugins = []platform.Plugin{llmgateway.New().WithManagement(gatewayDB[0], revision)}
 	}
-	app, err := platform.Assemble(ctx, platform.Options{Config: cfg, Logger: logging.Logger, Sink: logging.Sink(), Plugins: catalog()})
+	app, err := platform.Assemble(ctx, platform.Options{Config: cfg, Logger: logging.Logger, Sink: logging.Sink(), Plugins: plugins})
 	if err != nil {
 		return nil, err
 	}
