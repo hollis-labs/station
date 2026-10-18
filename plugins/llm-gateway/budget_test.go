@@ -29,7 +29,7 @@ func authedReq(method, url, body, principalID string) *http.Request {
 	return req
 }
 
-func TestBudgetsPerPrincipalAndShadowVsEnforce(t *testing.T) {
+func TestBudgetsPerPrincipalIndependentOfPolicyMode(t *testing.T) {
 	u := newUpstream(t, openaiOK)
 	store := newMemStore(100)
 
@@ -58,8 +58,7 @@ func TestBudgetsPerPrincipalAndShadowVsEnforce(t *testing.T) {
 		"o1": {id: "o1", dialect: openaiDialect{}, baseURL: u.URL, client: u.Client()},
 	}
 
-	// 1. In shadow mode, exhausting a caller's budget logs would_block=true with
-	// budget_state=exhausted, but lets the 3rd request through.
+	// Policy shadow mode must not relax configured budget limits.
 	ledger := NewLedger(store, logger)
 	gw, err := NewGateway(baseCfg, providers, ledger, logger)
 	if err != nil {
@@ -68,15 +67,17 @@ func TestBudgetsPerPrincipalAndShadowVsEnforce(t *testing.T) {
 	h := gw.Handler(openaiDialect{}, OpChat)
 	reqBody := `{"model":"fast","messages":[{"role":"user","content":"hi"}]}`
 
-	for i := range 3 {
+	for i := range 2 {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, authedReq("POST", "/v1/chat/completions", reqBody, "alice"))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("shadow call %d: status = %d, want 200 (%s)", i+1, rec.Code, rec.Body.String())
 		}
 	}
-	if !strings.Contains(logBuf.String(), `"budget_state":"exhausted"`) || !strings.Contains(logBuf.String(), `"per-caller-2reqs"`) {
-		t.Fatalf("expected shadow log with budget_state=exhausted and per-caller-2reqs, got:\n%s", logBuf.String())
+	recThird := httptest.NewRecorder()
+	h.ServeHTTP(recThird, authedReq("POST", "/v1/chat/completions", reqBody, "alice"))
+	if recThird.Code != http.StatusTooManyRequests {
+		t.Fatalf("shadow budget: got %d, want 429", recThird.Code)
 	}
 
 	// 2. Build a new Gateway over the SAME store (simulating a process restart)
@@ -110,7 +111,7 @@ func TestBudgetsPerPrincipalAndShadowVsEnforce(t *testing.T) {
 	}
 }
 
-func TestBudgetExhaustionAllowsFreeLocalRouteWhenPolicyPermits(t *testing.T) {
+func TestBudgetExhaustionCannotBeBypassedByTargetAllowRule(t *testing.T) {
 	localUp := newUpstream(t, openaiOK)
 	paidUp := newUpstream(t, openaiOK)
 	store := newMemStore(100)
@@ -179,18 +180,17 @@ func TestBudgetExhaustionAllowsFreeLocalRouteWhenPolicyPermits(t *testing.T) {
 	}
 	h := gw.Handler(openaiDialect{}, OpChat)
 
-	// "coder" has a paid target first and a free local target second. With the
-	// USD budget exhausted, policy denies the paid target and admits the free
-	// local target.
+	// A free tag is operator metadata, not proof that an attempt cannot spend.
+	// Neither target-specific nor broad allow rules can override a budget.
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, authedReq("POST", "/v1/chat/completions", `{"model":"coder","messages":[{"role":"user","content":"hi"}]}`, "dev-1"))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("coder status = %d, want 200 (%s)", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("coder status = %d, want 429 (%s)", rec.Code, rec.Body.String())
 	}
 	paidCalls, _, _ := paidUp.snapshot()
-	localCalls, _, localBody := localUp.snapshot()
-	if paidCalls != 0 || localCalls != 1 || !strings.Contains(localBody, `"qwen-coder"`) {
-		t.Fatalf("paidCalls=%d localCalls=%d localBody=%s; want 0 paid, 1 local (qwen-coder)", paidCalls, localCalls, localBody)
+	localCalls, _, _ := localUp.snapshot()
+	if paidCalls != 0 || localCalls != 0 {
+		t.Fatalf("budget bypass: paid=%d local=%d", paidCalls, localCalls)
 	}
 
 	// "paid-only" has no free target, so it is refused with 429 budget_exceeded.

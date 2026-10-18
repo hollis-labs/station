@@ -82,6 +82,8 @@ plugins:
       refresh: true                      # keep models.dev catalog fresh in the background
       # cache_dir: ~/.cache/go-modelsdev
       # price_file: ./custom-prices.json # optional table, reloaded via POST /v1/catalog/prices/reload
+    # Budgets always enforce, including when policy.mode is shadow.
+    # Missing/partial historical cost blocks matching spend budgets.
     budgets:
       - id: caller-daily
         scope: principal                 # total | principal (keyed on verified caller identity)
@@ -104,5 +106,4 @@ plugins:
       mode: shadow                       # shadow first; switch to enforce once the audit log looks right
       default_effect: allow
       rules:
-        - {id: allow-free-over-budget, budget_state: exhausted, tag: free, effect: allow, reason: free local targets remain available when paid budget is exhausted}
         - {id: no-ci-premium, principal: "ci-*", model: "claude-*", effect: deny, reason: premium models are off limits to CI}
