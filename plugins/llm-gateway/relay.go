@@ -716,6 +716,7 @@ func (g *Gateway) modelsFor(d Dialect) []ModelInfo {
 			}
 			_, viewCaps, limits, modalities, meta := g.catalog.ResolveTargetDetails(t)
 			price := g.catalog.ResolvePrice(t)
+			_, catalogProvider, catalogMatched := g.catalog.LookupModel(t.provider.catalogProvider, t.provider.id, t.model)
 			vc := viewCaps
 			if aggCaps == nil {
 				c := vc
@@ -729,19 +730,21 @@ func (g *Gateway) modelsFor(d Dialect) []ModelInfo {
 				aggCaps.Temperature = aggCaps.Temperature || vc.Temperature
 			}
 			tinfos = append(tinfos, TargetInfo{
-				Operations:   t.operations,
-				Provider:     t.provider.id,
-				Model:        t.model,
-				Dialect:      upDialect.Name(),
-				Tags:         t.tags,
-				BestEffort:   t.bestEffort,
-				Reachable:    ok,
-				State:        tguard.State(key).String(),
-				Capabilities: &vc,
-				Price:        price,
-				Limits:       limits,
-				Modalities:   modalities,
-				Metadata:     meta,
+				Operations:      t.operations,
+				Provider:        t.provider.id,
+				Model:           t.model,
+				Dialect:         upDialect.Name(),
+				CatalogProvider: catalogProvider,
+				CatalogMatched:  catalogMatched,
+				Tags:            t.tags,
+				BestEffort:      t.bestEffort,
+				Reachable:       ok,
+				State:           tguard.State(key).String(),
+				Capabilities:    &vc,
+				Price:           price,
+				Limits:          limits,
+				Modalities:      modalities,
+				Metadata:        meta,
 			})
 		}
 		if len(tinfos) > 0 {
@@ -804,9 +807,11 @@ func (g *Gateway) CatalogHandler() http.Handler {
 			models = g.catalog.ListModels(provFilter, modelFilter, familyFilter)
 		}
 		out := map[string]any{
-			"ttl_seconds": ttlSec,
-			"providers":   providers,
-			"models":      models,
+			"schema_version": 1,
+			"status":         g.catalog.Status(),
+			"ttl_seconds":    ttlSec,
+			"providers":      providers,
+			"models":         models,
 		}
 		if !fetchedAt.IsZero() {
 			out["fetched_at"] = fetchedAt.UTC().Format(time.RFC3339)
@@ -833,6 +838,8 @@ func (g *Gateway) CatalogRefreshHandler() http.Handler {
 		providers := g.catalog.ListProviders("")
 		models := g.catalog.ListModels("", "", "")
 		out := map[string]any{
+			"schema_version": 1,
+			"status":         g.catalog.Status(),
 			"ttl_seconds":    int64(g.catalog.TTL().Seconds()),
 			"provider_count": len(providers),
 			"model_count":    len(models),

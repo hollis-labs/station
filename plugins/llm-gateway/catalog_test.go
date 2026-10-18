@@ -187,6 +187,29 @@ func TestCatalogCentralizesModelsDevMetadataCapabilitiesAndPricing(t *testing.T)
 
 	// 2. GET /v1/models (both OpenAI and Anthropic shapes) surfaces enriched capabilities, price, limits, modalities, metadata.
 	_, oaModels := e.do(t, "GET", "/v1/models", oaAuth, "")
+	var modelList struct {
+		Data []struct {
+			ID      string       `json:"id"`
+			Targets []TargetInfo `json:"targets"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(oaModels), &modelList); err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range modelList.Data {
+		for _, target := range model.Targets {
+			switch target.Model {
+			case "gpt-backup":
+				if !target.CatalogMatched || target.CatalogProvider != "openai" {
+					t.Fatalf("missing resolved catalog identity: %+v", target)
+				}
+			case "t2":
+				if target.CatalogMatched || target.CatalogProvider != "" {
+					t.Fatalf("uncataloged target claims a match: %+v", target)
+				}
+			}
+		}
+	}
 	for _, want := range []string{
 		`"GPT Backup 4o Mini"`,
 		`"context":128000`,
