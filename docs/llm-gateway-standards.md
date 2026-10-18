@@ -1,7 +1,7 @@
 # Gateway standards and model intelligence
 
-Reviewed 2026-10-18 against merged Station PRs #7, #9 and #11, the published
-`libs/llm/core v0.2.0`, and the official sources linked below. This is the working
+Reviewed 2026-10-18 against merged Station PRs #7, #9, #11 and #13, the published
+`libs/llm/core v0.3.0`, and the official sources linked below. This is the working
 contract and gap map for Torque epic **EP-20261018-0001**. Tasks own progress;
 this document does not certify unimplemented provider features.
 
@@ -75,15 +75,37 @@ before treating this as an operationally mature source pipeline.
 The [models.dev contract](https://raw.githubusercontent.com/anomalyco/models.dev/dev/README.md)
 now includes canonical model identity, structured-output support, input limits,
 reasoning controls and additional pricing dimensions. Specialized model types are
-omitted unless requested. The currently pinned shared decoder loses some of those
-fields and collapses absent numeric rates into zero. Adding another source must
-preserve source identity, observation time, precedence and unknown values; catalog
-prices are estimates, not subscription invoices or verified account access.
+included by the default `type=all` endpoint in the pinned v0.3.0 library. A custom
+`catalog.url` is used unchanged. `/v1/catalog` exposes canonical identity,
+description, type/status, `provider_metadata`, reasoning controls, interleaving,
+experimental modes, input limits, and expanded pricing. Provider bodies, headers
+and API URLs are descriptive source data; Station never applies them to inference
+requests. Sharing a canonical model ID does not merge provider prices or access.
+
+Catalog `cost` omits unknown core rates; explicit zero means free. Audio rates and
+context tiers remain available as metadata. `cost_currency` is `USD` and
+`cost_unit` is `per_million_tokens`. The effective five-component `price_snapshot`
+carries `unknown_rates`; without tier selection, context-dependent rates remain
+unknown. Audio usage is not priced by this projection. Consumers must inspect
+these flags rather than assuming an omitted numeric field means zero.
+
+Usage entries retain `cost_partial`; aggregate `unpriced_calls` includes partial
+costs as well as calls with no cost. Such totals are lower bounds. This does not
+make budgeting fail closed on unknown prices. Catalog prices are estimates, not
+subscription invoices or verified account access. Historical snapshots are not
+rewritten. Unversioned metadata caches retain ambiguous zeros/false flags as
+unknown until a successful refresh recovers their presence.
+
+Catalog `capabilities.unknown` distinguishes absent flags from explicit false,
+including `structured_output`. `/v1/models` target capability booleans and routing
+still use the existing admission behavior; they are not a tri-state guarantee.
+Adding another source must preserve identity, observation time, precedence and
+unknown values.
 
 | Work | Torque task | Scope |
 |---|---|---|
 | Provider identity and freshness | CW-20261018-0021 | This implementation |
-| Current schema and unknown rates | CW-20261018-0022 | Shared decoder/cache/pricesource; release then adopt |
+| Current schema and unknown rates | CW-20261018-0022 | v0.3.0 adopted; metadata and partial costs preserved |
 | Resilient recurring sync | CW-20261018-0023 | Last-good snapshots, bounded retries/fetches, failure/recovery visibility |
 | Shared HTTP/MCP catalog and estimates | CW-20261018-0024 | Versioned DTOs, filtering/pagination, future sources, estimate completeness |
 | Native API and stateful route conformance | CW-20261018-0025 | Protocol coverage, operation metadata, account affinity |
@@ -105,8 +127,9 @@ so a concurrent catalog refresh can change the rate used for a call. The budget
 task owns fixing admission, snapshot timing, reconciliation and durable restart
 behavior together.
 
-Capability flags still use booleans with permissive unknown defaults. The new
-catalog-match flag exposes missing data but does not yet establish tri-state
+Effective target capability flags still use booleans with permissive defaults for
+uncataloged models. The catalog-match flag exposes missing data but does not yet
+establish tri-state
 capabilities, structured-output/reasoning admission or complete context limits.
 Those belong to the existing capability/conformance tasks and shared schema work.
 

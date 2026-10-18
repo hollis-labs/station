@@ -83,7 +83,8 @@ func (m *memStore) Totals(_ context.Context, q Query) ([]Total, error) {
 		t.Output += u.OutputTokens.Tokens
 		if e.CostUSD != nil {
 			t.CostUSD += *e.CostUSD
-		} else {
+		}
+		if e.CostUSD == nil || e.CostPartial {
 			t.UnpricedCalls++
 		}
 	}

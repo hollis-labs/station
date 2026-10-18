@@ -75,7 +75,7 @@ type Total struct {
 	Input    int64   `json:"input_tokens"`
 	Output   int64   `json:"output_tokens"`
 	CostUSD  float64 `json:"cost_usd"`
-	// UnpricedCalls counts calls with no cost, so CostUSD reads as a lower bound.
+	// UnpricedCalls counts calls with missing or partial costs, so CostUSD reads as a lower bound.
 	UnpricedCalls int `json:"unpriced_calls"`
 }
 

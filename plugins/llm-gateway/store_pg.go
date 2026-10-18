@@ -229,7 +229,7 @@ func (s *pgStore) Totals(ctx context.Context, q Query) ([]Total, error) {
 			+ (usage->'cache_write_tokens'->>'tokens')::bigint), 0),
 		coalesce(sum((usage->'output_tokens'->>'tokens')::bigint), 0),
 		coalesce(sum(cost_usd), 0),
-		count(*) FILTER (WHERE cost_usd IS NULL)
+		count(*) FILTER (WHERE cost_usd IS NULL OR cost_partial)
 		FROM llm_calls`+w+` GROUP BY provider, model ORDER BY provider, model`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query ledger totals: %w", err)

@@ -44,29 +44,44 @@ type TargetCapabilities struct {
 
 // ModelMetadata carries descriptive model fields from models.dev.
 type ModelMetadata struct {
-	Name            string `json:"name,omitempty"`
-	Family          string `json:"family,omitempty"`
-	OpenWeights     bool   `json:"open_weights,omitempty"`
-	ReleaseDate     string `json:"release_date,omitempty"`
-	KnowledgeCutoff string `json:"knowledge_cutoff,omitempty"`
-	LastUpdated     string `json:"last_updated,omitempty"`
+	Description      string `json:"description,omitempty"`
+	CanonicalModelID string `json:"canonical_model_id,omitempty"`
+	Type             string `json:"type,omitempty"`
+	Status           string `json:"status,omitempty"`
+	Name             string `json:"name,omitempty"`
+	Family           string `json:"family,omitempty"`
+	OpenWeights      bool   `json:"open_weights,omitempty"`
+	ReleaseDate      string `json:"release_date,omitempty"`
+	KnowledgeCutoff  string `json:"knowledge_cutoff,omitempty"`
+	LastUpdated      string `json:"last_updated,omitempty"`
 }
 
 // CatalogModelEntry is one model entry returned by GET /v1/catalog.
 type CatalogModelEntry struct {
-	ProviderID      string                     `json:"provider_id"`
-	ID              string                     `json:"id"`
-	Name            string                     `json:"name"`
-	Family          string                     `json:"family,omitempty"`
-	OpenWeights     bool                       `json:"open_weights,omitempty"`
-	ReleaseDate     string                     `json:"release_date,omitempty"`
-	KnowledgeCutoff string                     `json:"knowledge_cutoff,omitempty"`
-	LastUpdated     string                     `json:"last_updated,omitempty"`
-	Cost            modelsdev.Pricing          `json:"cost"`
-	PriceSnapshot   *usageledger.PriceSnapshot `json:"price_snapshot,omitempty"`
-	Limit           modelsdev.Limits           `json:"limit"`
-	Modalities      modelsdev.Modality         `json:"modalities"`
-	Capabilities    modelsdev.Capabilities     `json:"capabilities"`
+	Description      string `json:"description,omitempty"`
+	CanonicalModelID string `json:"canonical_model_id,omitempty"`
+	Type             string `json:"type,omitempty"`
+	Status           string `json:"status,omitempty"`
+	// ProviderMetadata is descriptive upstream data, never applied to requests.
+	ProviderMetadata *modelsdev.ModelProvider    `json:"provider_metadata,omitempty"`
+	ReasoningOptions []modelsdev.ReasoningOption `json:"reasoning_options,omitempty"`
+	Interleaved      *modelsdev.Interleaved      `json:"interleaved,omitempty"`
+	Experimental     *modelsdev.Experimental     `json:"experimental,omitempty"`
+	CostCurrency     string                      `json:"cost_currency"`
+	CostUnit         string                      `json:"cost_unit"`
+	ProviderID       string                      `json:"provider_id"`
+	ID               string                      `json:"id"`
+	Name             string                      `json:"name"`
+	Family           string                      `json:"family,omitempty"`
+	OpenWeights      bool                        `json:"open_weights,omitempty"`
+	ReleaseDate      string                      `json:"release_date,omitempty"`
+	KnowledgeCutoff  string                      `json:"knowledge_cutoff,omitempty"`
+	LastUpdated      string                      `json:"last_updated,omitempty"`
+	Cost             modelsdev.Pricing           `json:"cost"`
+	PriceSnapshot    *usageledger.PriceSnapshot  `json:"price_snapshot,omitempty"`
+	Limit            modelsdev.Limits            `json:"limit"`
+	Modalities       modelsdev.Modality          `json:"modalities"`
+	Capabilities     modelsdev.Capabilities      `json:"capabilities"`
 }
 
 // CatalogProviderSummary describes a provider in GET /v1/catalog.
@@ -336,7 +351,7 @@ func (c *Catalog) ResolveTargetDetails(t *target) (
 		reasoning = md.Capabilities.Reasoning
 		attachment = md.Capabilities.Attachment
 		temperature = md.Capabilities.Temperature
-		if md.Limit.ContextWindow > 0 || md.Limit.MaxOutputTokens > 0 {
+		if md.Limit.ContextWindow > 0 || md.Limit.MaxOutputTokens > 0 || md.Limit.MaxInputTokens != nil {
 			l := md.Limit
 			limits = &l
 		}
@@ -344,14 +359,18 @@ func (c *Catalog) ResolveTargetDetails(t *target) (
 			m := md.Modality
 			modalities = &m
 		}
-		if md.Name != "" || md.Family != "" || md.ReleaseDate != "" || md.KnowledgeCutoff != "" || md.OpenWeights {
+		if md.Name != "" || md.Family != "" || md.ReleaseDate != "" || md.KnowledgeCutoff != "" || md.OpenWeights || md.LastUpdated != "" || md.Description != "" || md.CanonicalModelID != "" || md.Type != "" || md.Status != "" {
 			meta = &ModelMetadata{
-				Name:            md.Name,
-				Family:          md.Family,
-				OpenWeights:     md.OpenWeights,
-				ReleaseDate:     md.ReleaseDate,
-				KnowledgeCutoff: md.KnowledgeCutoff,
-				LastUpdated:     md.LastUpdated,
+				Description:      md.Description,
+				CanonicalModelID: md.CanonicalModelID,
+				Type:             md.Type,
+				Status:           md.Status,
+				Name:             md.Name,
+				Family:           md.Family,
+				OpenWeights:      md.OpenWeights,
+				ReleaseDate:      md.ReleaseDate,
+				KnowledgeCutoff:  md.KnowledgeCutoff,
+				LastUpdated:      md.LastUpdated,
 			}
 		}
 	}
@@ -425,19 +444,29 @@ func (c *Catalog) ListModels(providerFilter, modelFilter, familyFilter string) [
 			}
 		}
 		out = append(out, CatalogModelEntry{
-			ProviderID:      r.ProviderID,
-			ID:              r.ID,
-			Name:            r.Name,
-			Family:          r.Family,
-			OpenWeights:     r.OpenWeights,
-			ReleaseDate:     r.ReleaseDate,
-			KnowledgeCutoff: r.KnowledgeCutoff,
-			LastUpdated:     r.LastUpdated,
-			Cost:            r.Cost,
-			PriceSnapshot:   snapPtr,
-			Limit:           r.Limit,
-			Modalities:      r.Modality,
-			Capabilities:    r.Capabilities,
+			Description:      r.Description,
+			CanonicalModelID: r.CanonicalModelID,
+			Type:             r.Type,
+			Status:           r.Status,
+			ProviderMetadata: r.Provider,
+			ReasoningOptions: r.ReasoningOptions,
+			Interleaved:      r.Interleaved,
+			Experimental:     r.Experimental,
+			CostCurrency:     modelsdev.PricingCurrency,
+			CostUnit:         modelsdev.PricingUnit,
+			ProviderID:       r.ProviderID,
+			ID:               r.ID,
+			Name:             r.Name,
+			Family:           r.Family,
+			OpenWeights:      r.OpenWeights,
+			ReleaseDate:      r.ReleaseDate,
+			KnowledgeCutoff:  r.KnowledgeCutoff,
+			LastUpdated:      r.LastUpdated,
+			Cost:             r.Cost,
+			PriceSnapshot:    snapPtr,
+			Limit:            r.Limit,
+			Modalities:       r.Modality,
+			Capabilities:     r.Capabilities,
 		})
 	}
 	return out
