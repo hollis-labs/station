@@ -60,7 +60,7 @@ Scopes:
 | `llm-gateway.embed` | Embeddings |
 | `llm-gateway.decide` | JEV System-1 decisions |
 | `llm-gateway.usage.read` | Operator access to usage across principals |
-| `llm-gateway.catalog.write` | Trigger metadata refresh |
+| `llm-gateway.catalog.write` | Trigger metadata refresh or reload the configured price file |
 | `llm-gateway.*` | All gateway permissions; reserve for operators |
 
 Use `station client list -keys-file "$KEYS"` to inspect IDs/scopes without
@@ -220,7 +220,8 @@ a bare build does not replace the installed artifact. For config/key changes,
 validate with the installed binary, then reload. Validation does not listen,
 but it resolves secrets, connects/migrates PostgreSQL, and fetches metadata when
 `catalog.warmup: true`. After restart, wait for health and authenticated model
-listing before sending inference; initial metadata fetch can take up to 10s.
+listing before sending inference; warmup uses `catalog.refresh_timeout` (default
+30s for fetching and retries, plus local cache publication).
 A failed warmup fails startup rather than exposing a cold metadata catalog.
 
 ```bash

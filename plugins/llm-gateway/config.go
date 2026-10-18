@@ -44,13 +44,20 @@ type CatalogConfig struct {
 	// TTL is how long cached model data is considered fresh before refreshing
 	// (a positive Go duration such as "90s" or "5m"). Default "90s".
 	TTL string `yaml:"ttl" json:"ttl"`
-	// CacheDir overrides the directory where catalog.json is stored on disk
+	// RefreshTimeout bounds each fetch cycle including retries (default 30s).
+	RefreshTimeout string `yaml:"refresh_timeout" json:"refresh_timeout"`
+	// MaxResponseBytes bounds HTTP responses and cache files (default 64 MiB, max 1 GiB).
+	MaxResponseBytes int64 `yaml:"max_response_bytes" json:"max_response_bytes"`
+	// RetryMin and RetryMax bound failure backoff (defaults 1s and 1m).
+	RetryMin string `yaml:"retry_min" json:"retry_min"`
+	RetryMax string `yaml:"retry_max" json:"retry_max"`
+	// CacheDir overrides the directory for source-bound catalog snapshots
 	// (default ~/.cache/go-modelsdev).
 	CacheDir string `yaml:"cache_dir" json:"cache_dir"`
-	// URL overrides the models.dev API endpoint (default https://models.dev/api.json).
+	// URL overrides the models.dev API endpoint (default https://models.dev/api.json?type=all).
 	URL string `yaml:"url" json:"url"`
 	// PriceFile is an optional path to a pricesource JSON price table
-	// (pricesource.LoadFile) layered ahead of models.dev.
+	// layered ahead of models.dev. Loaded at startup; explicitly reloadable.
 	PriceFile string `yaml:"price_file" json:"price_file"`
 	// Refresh controls whether the background refresher runs on TTL. Default
 	// true; set false to serve strictly from disk cache without background
@@ -79,8 +86,47 @@ func (c CatalogConfig) shouldRefresh() bool {
 	return true
 }
 
+type catalogRefreshSettings struct {
+	timeout, retryMin, retryMax time.Duration
+	maxBytes                    int64
+}
+
+func (c CatalogConfig) refreshSettings() (catalogRefreshSettings, error) {
+	s := catalogRefreshSettings{30 * time.Second, time.Second, time.Minute, 64 << 20}
+	for _, field := range []struct {
+		name, raw string
+		dest      *time.Duration
+	}{
+		{"refresh_timeout", c.RefreshTimeout, &s.timeout},
+		{"retry_min", c.RetryMin, &s.retryMin},
+		{"retry_max", c.RetryMax, &s.retryMax},
+	} {
+		if field.raw == "" {
+			continue
+		}
+		d, err := time.ParseDuration(field.raw)
+		if err != nil || d <= 0 {
+			return s, fmt.Errorf("llm-gateway: catalog.%s must be a positive duration", field.name)
+		}
+		*field.dest = d
+	}
+	if s.retryMax < s.retryMin {
+		return s, fmt.Errorf("llm-gateway: catalog.retry_max must be at least retry_min")
+	}
+	if c.MaxResponseBytes < 0 || c.MaxResponseBytes > 1<<30 {
+		return s, fmt.Errorf("llm-gateway: catalog.max_response_bytes must be between 1 and 1073741824, or zero for default")
+	}
+	if c.MaxResponseBytes != 0 {
+		s.maxBytes = c.MaxResponseBytes
+	}
+	return s, nil
+}
+
 func (c CatalogConfig) validate() error {
-	_, err := c.ttlDuration()
+	if _, err := c.ttlDuration(); err != nil {
+		return err
+	}
+	_, err := c.refreshSettings()
 	return err
 }
 

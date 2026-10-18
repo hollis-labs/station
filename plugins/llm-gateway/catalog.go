@@ -2,7 +2,6 @@ package llmgateway
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -24,8 +23,7 @@ type Catalog struct {
 	client         *modelsdev.Client
 	ttl            time.Duration
 	refreshEnabled bool
-	filePrices     *pricesource.Table
-	livePrices     pricesource.Live
+	filePrices     *filePriceSource
 	mdPrices       costcalc.PriceSource
 	chain          costcalc.PriceSource
 	logger         *slog.Logger
@@ -105,13 +103,15 @@ func NewCatalog(cfg CatalogConfig, rt http.RoundTripper, logger *slog.Logger) (*
 	if err != nil {
 		return nil, err
 	}
-	var filePrices *pricesource.Table
+	settings, err := cfg.refreshSettings()
+	if err != nil {
+		return nil, err
+	}
+	filePrices := newFilePriceSource(cfg.PriceFile)
 	if cfg.PriceFile != "" {
-		t, err := pricesource.LoadFile(cfg.PriceFile)
-		if err != nil {
-			return nil, fmt.Errorf("llm-gateway: catalog.price_file: %w", err)
+		if err := filePrices.Reload(context.Background()); err != nil {
+			return nil, err
 		}
-		filePrices = t
 	}
 
 	c := &Catalog{
@@ -123,11 +123,9 @@ func NewCatalog(cfg CatalogConfig, rt http.RoundTripper, logger *slog.Logger) (*
 
 	opts := []modelsdev.Option{
 		modelsdev.WithCacheTTL(ttl),
-		modelsdev.WithOnRefresh(func(mc *modelsdev.Client) {
-			if tbl, err := pricesource.FromCatalog(pricesource.SourceModelsDev, mc.LastFetchedAt(), mc.List()); err == nil {
-				c.livePrices.Store(tbl)
-			}
-		}),
+		modelsdev.WithRefreshTimeout(settings.timeout),
+		modelsdev.WithMaxResponseBytes(settings.maxBytes),
+		modelsdev.WithRetryBackoff(settings.retryMin, settings.retryMax),
 	}
 	if cfg.CacheDir != "" {
 		opts = append(opts, modelsdev.WithCacheDir(cfg.CacheDir))
@@ -138,13 +136,13 @@ func NewCatalog(cfg CatalogConfig, rt http.RoundTripper, logger *slog.Logger) (*
 	if rt != nil {
 		opts = append(opts, modelsdev.WithHTTPClient(&http.Client{
 			Transport: rt,
-			Timeout:   30 * time.Second,
+			Timeout:   settings.timeout,
 		}))
 	}
 
 	c.client = modelsdev.New(opts...)
 	c.mdPrices = pricesource.FromModelsDev(c.client)
-	c.chain = pricesource.Chain(c.filePrices, &c.livePrices, c.mdPrices)
+	c.chain = pricesource.Chain(c.filePrices, c.mdPrices)
 	return c, nil
 }
 
@@ -157,12 +155,21 @@ func (c *Catalog) Run(ctx context.Context) {
 }
 
 // Refresh forces an immediate fetch from the upstream models.dev endpoint and
-// updates both the on-disk cache and the in-memory price source.
+// updates the source-bound cache used by metadata and price lookups.
 func (c *Catalog) Refresh(ctx context.Context) error {
 	if c == nil || c.client == nil {
 		return nil
 	}
 	return c.client.Refresh(ctx)
+}
+
+// ReloadPrices explicitly reloads the configured operator price file.
+// Failed reloads preserve the last good table; no network fetch is performed.
+func (c *Catalog) ReloadPrices(ctx context.Context) error {
+	if c == nil || c.filePrices == nil {
+		return errPriceFileNotConfigured
+	}
+	return c.filePrices.Reload(ctx)
 }
 
 // TTL returns the configured cache TTL (default 90s).
@@ -178,21 +185,20 @@ func (c *Catalog) LastFetchedAt() time.Time {
 	if c == nil || c.client == nil {
 		return time.Time{}
 	}
-	// The client loads disk state lazily. Read it before reporting freshness
-	// so the first request after a restart does not claim the cache is empty.
-	c.client.ListProviders()
 	return c.client.LastFetchedAt()
 }
 
 // CatalogStatus describes metadata freshness, not provider reachability,
-// workspace entitlement or whether the background worker is healthy.
+// or workspace entitlement. Sync reports worker activity independently.
 type CatalogStatus struct {
-	Source         string     `json:"source"`
-	State          string     `json:"state"` // empty, fresh, stale
-	RefreshEnabled bool       `json:"refresh_enabled"`
-	FetchedAt      *time.Time `json:"fetched_at,omitempty"`
-	AgeSeconds     *float64   `json:"age_seconds,omitempty"`
-	StaleAfter     *time.Time `json:"stale_after,omitempty"`
+	Sync           *modelsdev.RefreshHealth `json:"sync,omitempty"`
+	PriceFile      PriceFileStatus          `json:"price_file"`
+	Source         string                   `json:"source"`
+	State          string                   `json:"state"` // empty, fresh, stale
+	RefreshEnabled bool                     `json:"refresh_enabled"`
+	FetchedAt      *time.Time               `json:"fetched_at,omitempty"`
+	AgeSeconds     *float64                 `json:"age_seconds,omitempty"`
+	StaleAfter     *time.Time               `json:"stale_after,omitempty"`
 }
 
 // Status reports the last usable snapshot. Stale metadata remains readable;
@@ -200,27 +206,28 @@ type CatalogStatus struct {
 func (c *Catalog) Status() CatalogStatus { return c.statusAt(time.Now()) }
 
 func (c *Catalog) statusAt(now time.Time) CatalogStatus {
-	s := CatalogStatus{Source: pricesource.SourceModelsDev, State: "empty"}
+	s := CatalogStatus{Source: pricesource.SourceModelsDev, State: "empty", PriceFile: PriceFileStatus{State: "disabled"}}
 	if c == nil || c.client == nil {
 		return s
 	}
 	s.RefreshEnabled = c.refreshEnabled
-	providers := c.client.ListProviders()
-	fetched := c.client.LastFetchedAt().UTC()
+	s.PriceFile = c.filePrices.Status()
+	h := c.client.Health()
+	s.State = h.State
+	fetched := h.LastSuccess.UTC()
 	if !fetched.IsZero() {
 		expires := fetched.Add(c.TTL())
 		age := max(0, now.Sub(fetched).Seconds())
 		s.FetchedAt, s.AgeSeconds, s.StaleAfter = &fetched, &age, &expires
-	}
-	for _, p := range providers {
-		if len(p.Models) > 0 {
-			s.State = "stale"
-			if !fetched.IsZero() && now.Before(fetched.Add(c.TTL())) {
-				s.State = "fresh"
+		if !h.LegacyCache && h.State != "empty" {
+			s.State = "fresh"
+			if !now.Before(expires) {
+				s.State = "stale"
 			}
-			break
 		}
 	}
+	h.State = s.State
+	s.Sync = &h
 	return s
 }
 
@@ -307,9 +314,6 @@ func (c *Catalog) ResolvePrice(t *target) *usageledger.PriceSnapshot {
 	for _, pid := range ids {
 		if pid == "" {
 			continue
-		}
-		if snap, ok := c.livePrices.Snapshot(pid, t.model); ok {
-			return &snap
 		}
 		if snap, ok := c.mdPrices.Snapshot(pid, t.model); ok {
 			return &snap

@@ -4,7 +4,7 @@ go 1.26.9
 
 require (
 	github.com/hollis-labs/libs/app/app-host v0.1.0
-	github.com/hollis-labs/libs/llm/core v0.3.0
+	github.com/hollis-labs/libs/llm/core v0.4.0
 	github.com/hollis-labs/libs/security/auth v0.1.0
 	github.com/hollis-labs/libs/security/policy v0.1.0
 	github.com/hollis-labs/libs/security/redact v0.2.0

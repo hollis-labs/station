@@ -821,8 +821,8 @@ func (g *Gateway) CatalogHandler() http.Handler {
 }
 
 // CatalogRefreshHandler answers POST /v1/catalog/refresh by triggering an
-// immediate refresh from the models.dev source and updating the cache and
-// live price table.
+// immediate refresh from the models.dev source and updating its cache.
+// The operator price file is reloaded separately.
 func (g *Gateway) CatalogRefreshHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if g.catalog == nil {
@@ -848,6 +848,26 @@ func (g *Gateway) CatalogRefreshHandler() http.Handler {
 			out["fetched_at"] = fetchedAt.UTC().Format(time.RFC3339)
 		}
 		writeJSON(w, http.StatusOK, out)
+	})
+}
+
+// CatalogPricesReloadHandler reloads only the configured local price table.
+func (g *Gateway) CatalogPricesReloadHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if g.catalog == nil {
+			openaiDialect{}.WriteError(w, http.StatusServiceUnavailable, "catalog_unavailable", "the model catalog is not configured")
+			return
+		}
+		if err := g.catalog.ReloadPrices(r.Context()); err != nil {
+			status := http.StatusUnprocessableEntity
+			if errors.Is(err, errPriceFileNotConfigured) {
+				status = http.StatusConflict
+			}
+			// Health carries a safe error class; never return a path or file contents.
+			writeJSON(w, status, map[string]any{"schema_version": 1, "error": map[string]string{"code": "price_file_reload_failed", "message": "the price file could not be reloaded"}, "status": g.catalog.Status()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"schema_version": 1, "status": g.catalog.Status()})
 	})
 }
 

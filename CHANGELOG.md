@@ -6,6 +6,13 @@ All notable user-facing changes land here.
 
 ### Changed
 
+- LLM gateway adopts `libs/llm/core v0.4.0` for bounded recurring catalog sync,
+  source-bound caches and atomic price provenance. Old unbound caches require a
+  fresh fetch on upgrade. Configure cycle timeout, response limit and retry bounds.
+- Catalog status includes safe refresh and price-file health. Reload local price
+  overrides independently with `POST /v1/catalog/prices/reload`; failed reloads
+  retain the last good table. Warmup uses the configured refresh timeout.
+
 - LLM gateway adopts `libs/llm/core v0.3.0`: catalog metadata preserves canonical
   identity, type/status, provider request descriptions, reasoning controls, input
   limits and pricing dimensions. Missing prices remain unknown; explicit zero

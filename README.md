@@ -214,13 +214,15 @@ client asked), and reads usage from the response. Endpoints, under
 - `POST /v1/embeddings` (OpenAI), for models with `kind: embedding`
 - `POST /v1/systemone` (JEV), for models with `kind: decision`. A decision model is an LLM like the others (provider, target, policy, guard, ledger); only its dialect differs. Question order is preserved byte for byte, and the answers are kept in the ledger
 - `GET /v1/models` (shape follows the `anthropic-version` header; decision models are not listed; includes resolved capabilities, pricing, context/output limits, modalities, and model metadata)
+- `POST /v1/catalog/prices/reload`: reload the configured local price table with last-good preservation, using `llm-gateway.catalog.write`
 - `GET /v1/catalog?provider=&model=&family=` and `POST /v1/catalog/refresh`: centralized model catalog (`llm/core/modelsdev` + `llm/core/pricesource`) cached on disk and refreshed in the background with a default `90s` TTL (`catalog.ttl` in `api.yaml`)
 - `GET /v1/usage?limit=&principal=&since=`
 
 See the [standards and model-intelligence contract](docs/llm-gateway-standards.md)
 for provider API direction, catalog freshness, identity/price precedence, and
 the tracked capability/budget/MCP gaps. Catalog reads report `schema_version: 1`
-and `status` (`empty`, `fresh`, `stale`); model targets report `catalog_matched`
+and `status` (`empty`, `fresh`, `stale`), with `status.sync` worker/retry health
+and `status.price_file` reload health; model targets report `catalog_matched`
 and their resolved `catalog_provider`. A wire dialect does not establish a
 provider's prices or capabilities. Custom provider IDs should set an explicit
 `catalog_provider`; an explicit mapping never falls back to another provider.
