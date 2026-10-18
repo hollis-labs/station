@@ -74,10 +74,14 @@ plugins:
             capabilities: {vision: true}   # mark false to skip this target for image requests
     catalog:
       ttl: 90s                           # default 90s cache/refresh TTL for models.dev metadata & pricing
+      refresh_timeout: 30s               # whole fetch cycle, including retries and warmup
+      max_response_bytes: 67108864        # HTTP/cache limit: 64 MiB (maximum 1 GiB)
+      retry_min: 1s                       # failure backoff doubles up to retry_max
+      retry_max: 1m
       warmup: true                       # fetch metadata before listening; fail startup if unavailable
       refresh: true                      # keep models.dev catalog fresh in the background
       # cache_dir: ~/.cache/go-modelsdev
-      # price_file: ./custom-prices.json # optional pricesource JSON table layered ahead of models.dev
+      # price_file: ./custom-prices.json # optional table, reloaded via POST /v1/catalog/prices/reload
     budgets:
       - id: caller-daily
         scope: principal                 # total | principal (keyed on verified caller identity)

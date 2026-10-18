@@ -1,7 +1,7 @@
 # Gateway standards and model intelligence
 
-Reviewed 2026-10-18 against merged Station PRs #7, #9, #11 and #13, the published
-`libs/llm/core v0.3.0`, and the official sources linked below. This is the working
+Reviewed 2026-10-18 against merged Station PRs #7, #9, #11, #13 and #14, the published
+`libs/llm/core v0.4.0`, and the official sources linked below. This is the working
 contract and gap map for Torque epic **EP-20261018-0001**. Tasks own progress;
 this document does not certify unimplemented provider features.
 
@@ -44,8 +44,16 @@ Freshness uses the configured TTL. Disabling background refresh does not make an
 old snapshot fresh; manual refresh still works. Status loads an existing disk
 cache before reporting its timestamp, including the first read after restart.
 `POST /v1/catalog/refresh` also returns the version and status on success.
-`refresh_enabled` describes configuration, not a worker heartbeat. Freshness is
-not provider health, entitlement or a guarantee that every model has metadata.
+`refresh_enabled` describes configuration. `status.sync` reports whether the
+worker is running, whether a refresh is in flight, attempts/failures,
+`last_attempt`, `last_finished`, `last_success`, `next_attempt`, safe error classes
+and upstream HTTP status. `source_id` hashes the exact source URL; raw URLs,
+response bodies and filesystem paths are excluded. Freshness is independent of
+refresh success: a failed manual refresh can coexist with fresh cached data.
+`next_attempt` is eligibility, not a promise when the worker is stopped. A missing
+value means immediately eligible. Only catalog data/fetch time persist; process
+attempt counters reset on restart. Freshness is not provider health, entitlement
+or a guarantee that every model has metadata.
 
 Provider identity resolution follows these rules:
 
@@ -60,22 +68,56 @@ Price precedence is target override, then the configured price file (local
 provider ID before mapped identity), then models.dev for the resolved provider.
 This preserves account-specific prices while preventing a missing aggregator model
 from borrowing a lab's rate. `price_file` is loaded at startup; catalog refresh
-does not reload it. Existing wildcard price-file entries remain explicit operator
-overrides. `/v1/models` target entries expose `catalog_matched` and the actual
+does not reload it. `POST /v1/catalog/prices/reload` reloads that configured path
+without fetching models.dev, protected by `llm-gateway.catalog.write`. Success
+returns schema version and status; invalid/missing files return 422 with safe
+health, or 409 if no file is configured. Reads continue using the previous table
+while reloads serialize; failed reloads preserve it. A bad startup file still
+fails initialization. Files must be regular JSON price tables no larger than
+8 MiB; malformed/trailing JSON, missing/null `entries`, invalid rates and unknown
+fields are rejected. An explicit `entries: []` clears overrides. Publish edits
+with an atomic rename (for example `pricesource.SaveFile`). Local filesystem
+reads are bounded by size but cannot be interrupted by a context; canceled
+reloads do not publish once cancellation is observed.
+
+`status.price_file` reports `disabled`, `empty`, or `loaded`, load attempts,
+consecutive failures, safe error code, last successful load time and entry count.
+`as_of` retains the operator-supplied price date, separate from load time. A failed
+reload leaves state `loaded` with the old load time and an error. No file watcher
+or periodic price-file reload runs. Changing its configured path follows normal
+management revision/apply semantics. Existing wildcard entries remain explicit
+operator overrides. `/v1/models` target entries expose `catalog_matched` and the actual
 matched `catalog_provider`; a price override can exist without a catalog match.
 
 ## Observed gaps and work queue
 
 The deployed config enables warmup and refresh every 15 minutes; its cache was
 observed updating during this review. The repository default remains 90 seconds.
-Existing periodic sync is useful, but the shared refresher drops errors and can
-retry immediately after an expired-cache failure. Library robustness needs work
-before treating this as an operationally mature source pipeline.
+The pinned v0.4.0 client keeps last-good data on failed/invalid/empty refreshes,
+serializes publication and applies bounded failure backoff. Successful refreshes
+run on `catalog.ttl`. Each cycle has at most three HTTP attempts; permanent HTTP
+errors and invalid payloads are not retried within that cycle. Failure delays
+start at `catalog.retry_min` (default 1s), double to `catalog.retry_max` (default
+1m), and reset on success. Both must be positive and max must be at least min.
+`catalog.refresh_timeout` (default 30s) bounds waiting/fetching/retries, including
+warmup; cache filesystem publication is not context-interruptible.
+`catalog.max_response_bytes` defaults to 64 MiB; zero selects the default and
+values above 1 GiB or below zero are rejected. These settings persist in SQLite
+management revisions. Stopping the plugin cancels the worker and waits for its
+work, subject to the host's shutdown deadline.
+
+Schema 2 caches are bound to the exact source URL, including query parameters.
+Old unbound `catalog.json` files are ignored by Station: the first startup after
+this upgrade must fetch a new snapshot (use warmup when required). No source
+ownership is inferred from an old file. Subsequent offline starts load the matching
+source-bound snapshot. Changing the URL cannot reuse another source's data.
+Price lookups use the library's atomic model/fetch-time read; Station no longer
+keeps a second models.dev price cache.
 
 The [models.dev contract](https://raw.githubusercontent.com/anomalyco/models.dev/dev/README.md)
 now includes canonical model identity, structured-output support, input limits,
 reasoning controls and additional pricing dimensions. Specialized model types are
-included by the default `type=all` endpoint in the pinned v0.3.0 library. A custom
+included by the default `type=all` endpoint in the pinned library. A custom
 `catalog.url` is used unchanged. `/v1/catalog` exposes canonical identity,
 description, type/status, `provider_metadata`, reasoning controls, interleaving,
 experimental modes, input limits, and expanded pricing. Provider bodies, headers
@@ -93,8 +135,8 @@ Usage entries retain `cost_partial`; aggregate `unpriced_calls` includes partial
 costs as well as calls with no cost. Such totals are lower bounds. This does not
 make budgeting fail closed on unknown prices. Catalog prices are estimates, not
 subscription invoices or verified account access. Historical snapshots are not
-rewritten. Unversioned metadata caches retain ambiguous zeros/false flags as
-unknown until a successful refresh recovers their presence.
+rewritten. Unbound metadata caches are not loaded; newly fetched snapshots
+preserve the distinction between absent fields and explicit zero/false values.
 
 Catalog `capabilities.unknown` distinguishes absent flags from explicit false,
 including `structured_output`. `/v1/models` target capability booleans and routing
@@ -106,7 +148,7 @@ unknown values.
 |---|---|---|
 | Provider identity and freshness | CW-20261018-0021 | This implementation |
 | Current schema and unknown rates | CW-20261018-0022 | v0.3.0 adopted; metadata and partial costs preserved |
-| Resilient recurring sync | CW-20261018-0023 | Last-good snapshots, bounded retries/fetches, failure/recovery visibility |
+| Resilient recurring sync | CW-20261018-0023 | v0.4.0 adopted; safe source health, bounded sync and explicit price-file reload |
 | Shared HTTP/MCP catalog and estimates | CW-20261018-0024 | Versioned DTOs, filtering/pagination, future sources, estimate completeness |
 | Native API and stateful route conformance | CW-20261018-0025 | Protocol coverage, operation metadata, account affinity |
 | Policy explanation and trusted facts | CW-20261018-0026 | Same decision path for preflight/enforcement; capabilities, privacy and budgets |

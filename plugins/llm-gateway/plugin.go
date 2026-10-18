@@ -106,7 +106,8 @@ func (p *Plugin) Register(ctx context.Context, reg *platform.PluginRegistry, dec
 		gw.SetCatalog(cat)
 	}
 	if cfg.Catalog.Warmup {
-		warmCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		// The catalog client applies the configured refresh timeout.
+		warmCtx, cancel := context.WithCancel(ctx)
 		err := gw.Catalog().Refresh(warmCtx)
 		cancel()
 		if err != nil {
@@ -169,6 +170,7 @@ func (p *Plugin) Register(ctx context.Context, reg *platform.PluginRegistry, dec
 		{Method: "GET", Path: "/v1/models", Scope: ScopeModelRead, Handler: gw.ModelsHandler()},
 		{Method: "GET", Path: "/v1/catalog", Scope: ScopeModelRead, Handler: gw.CatalogHandler()},
 		{Method: "POST", Path: "/v1/catalog/refresh", Scope: ScopeCatalogWrite, Handler: gw.CatalogRefreshHandler()},
+		{Method: "POST", Path: "/v1/catalog/prices/reload", Scope: ScopeCatalogWrite, Handler: gw.CatalogPricesReloadHandler()},
 		{Method: "GET", Path: "/v1/usage", Scope: ScopeUsageRead, Handler: gw.UsageHandler()},
 	} {
 		if err := reg.Mount(rt); err != nil {
