@@ -147,6 +147,9 @@ type BudgetConfig struct {
 	Window string `yaml:"window" json:"window"`
 	// MaxUSD caps estimated spend in US dollars over Window.
 	MaxUSD float64 `yaml:"max_usd" json:"max_usd"`
+	// RequireCostBound refuses attempts without a supported, priced upper bound.
+	// Requires max_usd >= one microdollar. Default false preserves observed-spend admission.
+	RequireCostBound bool `yaml:"require_cost_bound" json:"require_cost_bound,omitempty"`
 	// MaxRequests limits admitted upstream attempts over Window, including
 	// in-flight work, failures and cancellations. Admission time owns the window.
 	MaxRequests int64 `yaml:"max_requests" json:"max_requests"`
@@ -332,6 +335,9 @@ type TargetConfig struct {
 	// Price is optional. With it, calls record an estimated cost; without it
 	// they record usage and an explicitly unpriced cost.
 	Price *PriceConfig `yaml:"price" json:"price"`
+	// CostBoundMethod is an operator assertion of the target's billing contract.
+	// tokenized_embeddings_v1 means flat input-token-only billing for token ID arrays.
+	CostBoundMethod string `yaml:"cost_bound_method" json:"cost_bound_method,omitempty"`
 }
 
 // CapabilitiesConfig overrides a target's capabilities; nil means inherit from
@@ -439,6 +445,9 @@ func (c *Config) Validate() error {
 			if t.Price != nil && snapshot(t.Price).Validate() != nil {
 				return fmt.Errorf("llm-gateway: model %q: price rates must be finite and non-negative", m.Name)
 			}
+			if t.CostBoundMethod != "" && (t.CostBoundMethod != tokenizedEmbeddingBound || op != OpEmbed || upDialect.Name() != "openai" || t.Translate) {
+				return fmt.Errorf("llm-gateway: model %q: cost_bound_method requires native OpenAI tokenized embeddings", m.Name)
+			}
 		}
 	}
 	if err := c.Catalog.validate(); err != nil {
@@ -470,6 +479,9 @@ func validateBudgets(bs []BudgetConfig) error {
 		}
 		if !validBudgetUSD(b.MaxUSD) || b.MaxRequests < 0 || (b.MaxUSD == 0 && b.MaxRequests == 0) {
 			return fmt.Errorf("llm-gateway: budget %q: set a finite, representable positive max_usd and/or positive max_requests", b.ID)
+		}
+		if b.RequireCostBound && b.MaxUSD < 0.000001 {
+			return fmt.Errorf("llm-gateway: budget %q: require_cost_bound needs max_usd of at least one microdollar", b.ID)
 		}
 		for _, g := range []string{b.Principal, b.Model} {
 			if _, err := path.Match(g, ""); err != nil {

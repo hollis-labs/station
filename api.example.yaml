@@ -84,7 +84,7 @@ plugins:
       # price_file: ./custom-prices.json # optional table, reloaded via POST /v1/catalog/prices/reload
     # Budgets always enforce, including when policy.mode is shadow.
     # SQL reservations persist before dispatch; unresolved cost blocks other
-    # matching spend attempts. A single call still has no hard dollar ceiling.
+    # matching spend attempts. Default spend checks do not bound a single call.
     # Missing/partial historical cost blocks matching spend budgets.
     # Missing base rates refuse before dispatch (budget_price_unknown).
     # Base pricing alone does not cover every cache/reasoning/tool charge.
@@ -93,6 +93,7 @@ plugins:
         scope: principal                 # total | principal (keyed on verified caller identity)
         window: day                      # day | week | month | rolling duration ("1h", "24h")
         max_usd: 5.00
+        require_cost_bound: false        # opt in only for supported requests/declared target contracts
       - id: total-monthly
         scope: total
         window: month

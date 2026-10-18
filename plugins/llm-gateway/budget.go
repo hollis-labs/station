@@ -22,7 +22,8 @@ const (
 // receives this summary as facts on llm.invoke.
 type BudgetStatus struct {
 	// State is "ok", "exhausted", "unknown" (incomplete spend history), or
-	// "price_unknown" (this attempt lacks usable base token rates).
+	// "price_unknown" (this attempt lacks usable base token rates), or
+	// "unbounded" (a required cost bound cannot be established).
 	State   string
 	Unknown []string
 	// Exhausted lists the IDs of budgets that refused the call.
@@ -144,10 +145,14 @@ func NewBudgets(cfgs []BudgetConfig, store Store, clock quota.Clock) (*Budgets, 
 		if h > horizon {
 			horizon = h
 		}
+		maxMicros := usdToMicros(c.MaxUSD)
+		if c.RequireCostBound {
+			maxMicros, _ = scaledMicros(c.MaxUSD, 1000000, false)
+		}
 		items = append(items, compiledBudget{
 			cfg:       c,
 			window:    w,
-			maxMicros: usdToMicros(c.MaxUSD),
+			maxMicros: maxMicros,
 			maxReqs:   c.MaxRequests,
 		})
 	}
@@ -170,14 +175,27 @@ func NewBudgets(cfgs []BudgetConfig, store Store, clock quota.Clock) (*Budgets, 
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		var out []quota.SeedEntry
+		sums := map[quota.Counter]int64{}
+		seen := map[string]bool{}
 		for _, e := range entries {
-			if e.ID != "" && b.seen[e.ID] {
+			if e.ID != "" && (b.seen[e.ID] || seen[e.ID]) {
 				continue
 			}
 			if e.ID != "" {
-				b.seen[e.ID] = true
+				seen[e.ID] = true
 			}
-			out = append(out, b.entriesFor(e)...)
+			for _, seed := range b.entriesFor(e) {
+				// quota's counters use int64. Refuse an unrepresentable retained
+				// history rather than let accumulated charges wrap and reopen spend.
+				if seed.Entry.Amount < 0 || sums[seed.Counter] > math.MaxInt64-seed.Entry.Amount {
+					return nil, fmt.Errorf("budget history exceeds counter capacity")
+				}
+				sums[seed.Counter] += seed.Entry.Amount
+				out = append(out, seed)
+			}
+		}
+		for id := range seen {
+			b.seen[id] = true
 		}
 		return out, nil
 	}
@@ -203,10 +221,19 @@ func (b *Budgets) entriesFor(e Entry) []quota.SeedEntry {
 		if item.maxMicros > 0 && (e.CostUSD == nil || e.CostPartial || !validBudgetUSD(*e.CostUSD)) {
 			out = append(out, quota.SeedEntry{Counter: item.unknownLimit(callerID).Counter(), Entry: quota.Entry{At: at, Amount: 1}})
 		}
-		if item.maxMicros > 0 && e.CostUSD != nil && validBudgetUSD(*e.CostUSD) && *e.CostUSD > 0 {
+		if item.maxMicros > 0 && e.CostUSD != nil && validBudgetUSD(*e.CostUSD) {
+			amount := usdToMicros(*e.CostUSD)
+			if item.cfg.RequireCostBound {
+				amount, _ = scaledMicros(*e.CostUSD, 1000000, true)
+				if e.CostBound != nil && !e.CostPartial {
+					// A verified tokenized embedding settles the exact input count;
+					// retain its integer charge instead of re-rounding a float total.
+					amount = max(amount, e.CostBound.MaxCostMicros)
+				}
+			}
 			out = append(out, quota.SeedEntry{
 				Counter: item.usdLimit(callerID).Counter(),
-				Entry:   quota.Entry{At: at, Amount: usdToMicros(*e.CostUSD)},
+				Entry:   quota.Entry{At: at, Amount: amount},
 			})
 		}
 		if item.maxReqs > 0 {
@@ -254,6 +281,10 @@ func (b *Budgets) Record(e Entry) error {
 // Check evaluates all budgets matching caller and model, returning the
 // combined budget_state facts for policy admission.
 func (b *Budgets) Check(ctx context.Context, caller Caller, model string) (BudgetStatus, error) {
+	return b.check(ctx, caller, model, nil)
+}
+
+func (b *Budgets) check(ctx context.Context, caller Caller, model string, bound *CostBound) (BudgetStatus, error) {
 	status := BudgetStatus{State: "ok"}
 	if b == nil || len(b.items) == 0 {
 		return status, nil
@@ -281,7 +312,11 @@ func (b *Budgets) Check(ctx context.Context, caller Caller, model string) (Budge
 			if !unknown.Allowed {
 				status.Unknown = append(status.Unknown, item.cfg.ID)
 			}
-			dec, err := b.limiter.Check(ctx, item.usdLimit(callerID), 1)
+			amount := int64(1)
+			if item.cfg.RequireCostBound && bound != nil {
+				amount = bound.MaxCostMicros
+			}
+			dec, err := b.limiter.Check(ctx, item.usdLimit(callerID), amount)
 			if err != nil {
 				return status, err
 			}

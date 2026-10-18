@@ -64,6 +64,8 @@ type Entry struct {
 	CostUSD *float64 `json:"cost_usd,omitempty"`
 	// CostPartial marks a cost that is a lower bound (some tokens unpriced).
 	CostPartial bool `json:"cost_partial,omitempty"`
+	// CostBound is the immutable admission bound, never actual usage or a bill.
+	CostBound *CostBound `json:"cost_bound,omitempty"`
 	// Detail is Record.Detail.
 	Detail json.RawMessage `json:"detail,omitempty"`
 }
@@ -172,6 +174,13 @@ func (l *Ledger) Add(rec Record) Entry {
 		e.ID = rec.Target.reservation.ID
 		e.Row.RecordedAt = rec.Target.reservation.Row.RecordedAt
 		e.Row.SessionID = rec.Target.reservation.Row.SessionID
+		e.CostBound = rec.Target.reservation.CostBound
+		if e.CostBound != nil && !boundUsageAgrees(e.CostBound, rec.Usage, e) {
+			// Keep the actual report but block subsequent spend: the provider's
+			// response did not establish the billing contract used for admission.
+			e.CostPartial = true
+			l.logger.Error("budget.bound_usage_mismatch", "request_id", e.RequestID, "entry_id", e.ID)
+		}
 	}
 	l.log(e)
 	// The caller's request has been answered; the write gets its own bounded

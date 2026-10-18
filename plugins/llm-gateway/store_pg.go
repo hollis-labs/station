@@ -54,6 +54,7 @@ var pgMigrations = []string{
 	CREATE INDEX llm_calls_target ON llm_calls (provider, model, recorded_at);
 	CREATE INDEX llm_calls_request ON llm_calls (request_id);`,
 	`ALTER TABLE llm_calls ADD COLUMN conversation_id text NOT NULL DEFAULT '';`,
+	`ALTER TABLE llm_calls ADD COLUMN cost_bound jsonb;`,
 }
 
 const migrationLock = 7301160 // arbitrary, stable: serializes concurrent starters
@@ -112,8 +113,8 @@ func (s *pgStore) migrate(ctx context.Context) error {
 
 const insertEntry = `INSERT INTO llm_calls
 	(id, recorded_at, request_id, principal, verified, operation, dialect, alias, provider, model,
-	 status, outcome, streamed, latency_ms, usage, price, cost_kind, cost_usd, cost_partial, detail, conversation_id)
-	VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+	 status, outcome, streamed, latency_ms, usage, price, cost_kind, cost_usd, cost_partial, detail, conversation_id, cost_bound)
+	VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
 	ON CONFLICT (id) DO NOTHING`
 
 func (s *pgStore) Add(ctx context.Context, entries ...Entry) error {
@@ -146,9 +147,17 @@ func addPG(ctx context.Context, db pgBatcher, entries ...Entry) error {
 		if len(e.Detail) > 0 {
 			detail = []byte(e.Detail)
 		}
+		var bound any
+		if e.CostBound != nil {
+			raw, err := json.Marshal(e.CostBound)
+			if err != nil {
+				return err
+			}
+			bound = raw
+		}
 		batch.Queue(insertEntry, e.ID, e.Row.RecordedAt, e.RequestID, e.Row.SessionID, e.Verified, string(e.Operation),
 			e.Dialect, e.Alias, e.Row.Provider, e.Row.Model, e.Status, e.Outcome, e.Streamed, e.LatencyMS,
-			usage, price, string(e.Row.CostKind), e.CostUSD, e.CostPartial, detail, e.ConversationID)
+			usage, price, string(e.Row.CostKind), e.CostUSD, e.CostPartial, detail, e.ConversationID, bound)
 	}
 	res := db.SendBatch(ctx, batch)
 	defer res.Close()
@@ -205,7 +214,7 @@ func recentPG(ctx context.Context, db pgReader, q Query) ([]Entry, error) {
 		limitSQL = fmt.Sprintf(" LIMIT $%d", len(args))
 	}
 	rows, err := db.Query(ctx, fmt.Sprintf(`SELECT id, recorded_at, request_id, principal, verified, operation, dialect,
-		alias, provider, model, status, outcome, streamed, latency_ms, usage, price, cost_kind, cost_usd, cost_partial, detail, conversation_id
+		alias, provider, model, status, outcome, streamed, latency_ms, usage, price, cost_kind, cost_usd, cost_partial, detail, conversation_id, cost_bound
 		FROM (SELECT * FROM llm_calls%s ORDER BY recorded_at DESC, id DESC%s) recent
 		ORDER BY recorded_at, id`, w, limitSQL), args...)
 	if err != nil {
@@ -215,14 +224,14 @@ func recentPG(ctx context.Context, db pgReader, q Query) ([]Entry, error) {
 	var out []Entry
 	for rows.Next() {
 		var (
-			e            Entry
-			op, costKind string
-			usage, price []byte
-			detail       []byte
+			e             Entry
+			op, costKind  string
+			usage, price  []byte
+			detail, bound []byte
 		)
 		if err := rows.Scan(&e.ID, &e.Row.RecordedAt, &e.RequestID, &e.Row.SessionID, &e.Verified, &op, &e.Dialect,
 			&e.Alias, &e.Row.Provider, &e.Row.Model, &e.Status, &e.Outcome, &e.Streamed, &e.LatencyMS,
-			&usage, &price, &costKind, &e.CostUSD, &e.CostPartial, &detail, &e.ConversationID); err != nil {
+			&usage, &price, &costKind, &e.CostUSD, &e.CostPartial, &detail, &e.ConversationID, &bound); err != nil {
 			return nil, fmt.Errorf("scan ledger row: %w", err)
 		}
 		e.Operation, e.Row.CostKind, e.Row.MessageID = Operation(op), usageledger.CostKind(costKind), e.RequestID
@@ -239,6 +248,11 @@ func recentPG(ctx context.Context, db pgReader, q Query) ([]Entry, error) {
 		}
 		if detail != nil {
 			e.Detail = detail
+		}
+		if bound != nil {
+			if err := json.Unmarshal(bound, &e.CostBound); err != nil {
+				return nil, fmt.Errorf("decode admission cost bound: %w", err)
+			}
 		}
 		out = append(out, e)
 	}

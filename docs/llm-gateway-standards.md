@@ -157,7 +157,7 @@ unknown values.
 | Provider headers | CW-20261017-0013 | Existing task; auth/version/workspace/beta headers and precedence |
 | Unknown capabilities/readiness | CW-20261017-0019 | Warmup is implemented; uncataloged capabilities still default permissively |
 | Versioned configuration/conformance | CW-20261017-0020 | Management document version exists; exported schema and reusable probes remain |
-| Budget/accounting correctness | CW-20261017-0021 | Durable request admission implemented; per-call USD bounds, complete metering and recovery remain |
+| Budget/accounting correctness | CW-20261017-0021 | Durable request admission and opt-in tokenized embedding bounds implemented; general bounds, metering and recovery remain |
 | Diagnostics/telemetry | CW-20261017-0022 | Usage components, correlation, queue/persistence health |
 | Activity events | CW-20261017-0023 | Workflow/lifecycle facts, separate from telemetry |
 
@@ -184,9 +184,22 @@ values. Unknown optional components remain distinct and can still produce partia
 cost on settlement. Legacy inline prices preserve their existing zero semantics;
 price files can represent each missing rate explicitly.
 
-CW-20261017-0021 still owns priced per-call bounds, request-specific rate/feature
-coverage, complete attempt metering and operator/provider-assisted reconciliation.
-A single call can exceed remaining dollars; this is not yet a hard spend ceiling.
+Spend budgets can now opt into `require_cost_bound`. The initial versioned target
+contract, `cost_bound_method: tokenized_embeddings_v1`, supports native OpenAI
+embedding requests containing token-ID arrays. Exact token counts and a captured
+flat input rate produce a microdollar bound checked atomically before dispatch.
+The operator must establish input-only billing for the actual account/endpoint;
+model discovery never infers this declaration. Unsupported request shapes fail
+closed with `422 budget_cost_unbounded`. Limits round down, costs round up, and
+overflowing histories fail closed. The persisted bound survives SQL restart and
+settlement; incomplete or mismatching usage still blocks other spend. No parallel
+USD holds are released based only on the bound. PostgreSQL schema v3 adds the
+nullable bound column; existing rows remain intact, and older binaries refuse v3.
+
+CW-20261017-0021 still owns general chat/tool/multimodal bounds, request-specific
+rate/feature coverage, complete metering and operator/provider-assisted recovery.
+Default observed-spend budgets can still overshoot on a single call. Strict bounds
+are at configured rates, not a promise about subscription debit or provider bills.
 All workers must use the reservation path and consistent budget configuration.
 Memory storage is single-process only and stops budgeted admission at capacity.
 Usage totals retain their successful-call contract; budget counters also count
@@ -201,8 +214,12 @@ distinct cache-write durations and feature pricing, while token counting is an
 estimate without caching logic
 ([pricing](https://platform.claude.com/docs/en/about-claude/pricing),
 [token counting](https://platform.claude.com/docs/en/build-with-claude/token-counting)).
-The next bound implementation must identify supported request shapes and rate
-coverage, then refuse unsupported cases rather than promote an estimate to a cap.
+The initial bound deliberately uses only tokenized embedding requests, whose
+token-array input and input-token pricing are documented in the
+[embedding API](https://developers.openai.com/api/reference/resources/embeddings/methods/create)
+and [embedding guide](https://developers.openai.com/api/docs/guides/embeddings).
+Future methods must define supported shapes and rate coverage before admitting
+them under strict budgets.
 
 Effective target capability flags still use booleans with permissive defaults for
 uncataloged models. The catalog-match flag exposes missing data but does not yet

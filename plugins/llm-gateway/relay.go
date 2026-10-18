@@ -43,17 +43,19 @@ type provider struct {
 }
 
 type target struct {
-	reservation   *Entry // set only on a per-attempt copy, never a shared route
-	provider      *provider
-	model         string
-	operations    []Operation
-	translate     bool
-	tags          []string
-	bestEffort    bool
-	headerTimeout time.Duration
-	capsCfg       CapabilitiesConfig
-	caps          llmtypes.ProviderCapabilities
-	price         *usageledger.PriceSnapshot
+	reservation     *Entry // set only on a per-attempt copy, never a shared route
+	costBoundMethod string
+	costBound       *CostBound // computed from rewritten upstream bytes, never client-supplied
+	provider        *provider
+	model           string
+	operations      []Operation
+	translate       bool
+	tags            []string
+	bestEffort      bool
+	headerTimeout   time.Duration
+	capsCfg         CapabilitiesConfig
+	caps            llmtypes.ProviderCapabilities
+	price           *usageledger.PriceSnapshot
 }
 
 // Gateway relays provider-native requests to configured upstreams.
@@ -143,16 +145,17 @@ func NewGateway(cfg Config, providers map[string]*provider, ledger *Ledger, logg
 				return nil, fmt.Errorf("llm-gateway: no runtime for provider %q", t.Provider)
 			}
 			g.models[m.Name] = append(g.models[m.Name], &target{
-				provider:      p,
-				model:         t.Model,
-				translate:     t.Translate,
-				tags:          slices.Clone(t.Tags),
-				bestEffort:    t.BestEffort,
-				headerTimeout: t.headerTimeout(),
-				capsCfg:       t.Capabilities,
-				operations:    t.Operations,
-				caps:          t.Capabilities.resolve(),
-				price:         snapshot(t.Price),
+				provider:        p,
+				model:           t.Model,
+				translate:       t.Translate,
+				tags:            slices.Clone(t.Tags),
+				bestEffort:      t.BestEffort,
+				headerTimeout:   t.headerTimeout(),
+				capsCfg:         t.Capabilities,
+				operations:      t.Operations,
+				caps:            t.Capabilities.resolve(),
+				price:           snapshot(t.Price),
+				costBoundMethod: t.CostBoundMethod,
 			})
 		}
 		if len(g.models[m.Name]) > 0 {
@@ -416,6 +419,9 @@ func (g *Gateway) relay(w http.ResponseWriter, r *http.Request, d Dialect, op Op
 			attempt.price = &price
 		}
 		t = &attempt
+		if g.budgets.requiresCostBound(caller, meta.Model) && len(req.Header.Values("OpenAI-Beta")) == 0 && len(req.Header.Values("Anthropic-Beta")) == 0 {
+			t.costBound = boundAttempt(op, out, t)
+		}
 		reservation, bstat, reserveErr := g.budgets.Reserve(reqCtx, caller, requestID, meta.Model, op, d.Name(), t, meta.Stream)
 		if reserveErr != nil || bstat.State != "ok" {
 			if cancelAttempt != nil {
@@ -556,6 +562,9 @@ func (g *Gateway) pass(w http.ResponseWriter, r *http.Request, d Dialect, op Ope
 
 	sse := strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream")
 	meter := d.NewMeter(op, meta.Stream, injected)
+	if t.costBound != nil {
+		meter = &boundedEmbeddingMeter{}
+	}
 	outcome := OutcomeOK
 	if resp.StatusCode >= 400 {
 		outcome = OutcomeUpstreamErr
@@ -769,6 +778,7 @@ func (g *Gateway) modelsFor(d Dialect) []ModelInfo {
 				aggCaps.Temperature = aggCaps.Temperature || vc.Temperature
 			}
 			tinfos = append(tinfos, TargetInfo{
+				CostBoundMethod: t.costBoundMethod,
 				Operations:      t.operations,
 				Provider:        t.provider.id,
 				Model:           t.model,

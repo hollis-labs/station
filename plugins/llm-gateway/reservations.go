@@ -51,11 +51,15 @@ func (snapshotStore) Totals(context.Context, Query) ([]Total, error) {
 func (snapshotStore) Close() {}
 
 func (b *Budgets) checkEntries(ctx context.Context, caller Caller, model string, entries []Entry) (BudgetStatus, error) {
+	return b.checkEntriesBound(ctx, caller, model, entries, nil)
+}
+
+func (b *Budgets) checkEntriesBound(ctx context.Context, caller Caller, model string, entries []Entry, bound *CostBound) (BudgetStatus, error) {
 	view, err := NewBudgets(b.cfgs, snapshotStore{entries}, b.clock)
 	if err != nil {
 		return BudgetStatus{}, err
 	}
-	return view.Check(ctx, caller, model)
+	return view.check(ctx, caller, model, bound)
 }
 
 // CheckStored is a fresh preflight view. Reserve repeats it under the durable
@@ -79,8 +83,8 @@ func (b *Budgets) CheckStored(ctx context.Context, caller Caller, model string) 
 // Reserve records an admitted upstream attempt before dispatch. Request budgets
 // consume one slot; spend budgets see unresolved cost until settlement, so a
 // second matching spend attempt fails closed rather than spending concurrently.
-// This does not bound the first attempt's dollar cost. A priced, bounded estimate
-// is required before this can promise a hard dollar ceiling.
+// Budgets with RequireCostBound also check the whole supported attempt's bound.
+// Other budgets retain observed-spend admission without a per-attempt ceiling.
 func (b *Budgets) Reserve(ctx context.Context, caller Caller, requestID, alias string, op Operation, dialect string, target *target, stream bool) (*Entry, BudgetStatus, error) {
 	status := BudgetStatus{State: "ok"}
 	if b == nil || len(b.items) == 0 {
@@ -98,6 +102,10 @@ func (b *Budgets) Reserve(ctx context.Context, caller Caller, requestID, alias s
 	}
 	e := Entry{ID: newEntryID(), RequestID: requestID, ConversationID: caller.ConversationID, Alias: alias, Operation: op, Dialect: dialect, Outcome: OutcomeReserved, Verified: caller.Known, Streamed: stream,
 		Row: usageledger.Row{SessionID: principal, MessageID: requestID, Provider: target.provider.id, Model: target.model, Price: target.price}}
+	if b.requiresCostBound(caller, alias) && target.costBound != nil {
+		copy := *target.costBound
+		e.CostBound = &copy
+	}
 	// The store stamps admission time after acquiring its lock. Otherwise time
 	// spent waiting for a contended lock could charge the previous window.
 	e.Row.RecordedAt = b.clock.Now().UTC()
@@ -116,6 +124,19 @@ func (b *Budgets) Reserve(ctx context.Context, caller Caller, requestID, alias s
 		if priced := b.checkPrice(caller, alias, op, e.Row.Price); priced.State != "ok" {
 			status = priced
 			return errBudgetRefused
+		}
+		if b.requiresCostBound(caller, alias) {
+			if e.CostBound == nil {
+				status.State = "unbounded"
+				return errBudgetRefused
+			}
+			status, err = view.checkEntriesBound(ctx, caller, alias, entries, e.CostBound)
+			if err != nil {
+				return err
+			}
+			if status.State != "ok" {
+				return errBudgetRefused
+			}
 		}
 		return nil
 	})
