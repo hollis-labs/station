@@ -280,6 +280,25 @@ remains free. A `free` tag cannot bypass a budget; use budget model filters to
 exclude a separate local alias when appropriate. Every fallback needs its own
 reservation and consumes another request slot.
 
+A matching spend budget also requires usable base token rates before dispatch:
+input for embeddings; input and output for chat, Responses and decisions.
+Absent snapshots, unknown required rates, and invalid rates return
+`503 budget_price_unknown` without writing a reservation or contacting the
+provider. This applies to each selected target, including fallbacks; it does not
+automatically select a different target on a pricing refusal. Known zero rates
+remain valid. Request-only budgets and calls outside the spend budget's filters
+do not require prices. Fix the configured override or refresh/reload the relevant
+price source before retrying; this error has no time-based `Retry-After`.
+
+This checks the same captured snapshot that settlement uses. Missing optional
+cache/reasoning rates can still make actual usage partially priced and block
+subsequent spend through `budget_cost_unknown`. The legacy inline `price` object
+treats zero input/output as known free rates and zero optional rates as unknown;
+use `catalog.price_file` when omitted and explicitly zero components must be
+distinguished. Catalog tiered pricing without a resolved flat rate fails this
+base-rate check. A known base rate does not certify freshness, account-specific
+billing, feature charges, or complete pricing for the request.
+
 Completion atomically replaces the reservation with its usage and outcome,
 including failures and cancellations. ID, admission time, identity and captured
 price stay fixed. Identical settlement retries are safe; conflicting retries are
@@ -291,10 +310,10 @@ admission time, so a long call settles into the window in which it started.
 
 Request limits now cover in-flight attempts across processes and restarts with
 SQL storage. Spend limits conservatively block overlapping attempts while cost
-is unresolved; they do **not** yet bound a single attempt's dollar cost or refuse
-all unpriced models before their first call. Priced per-call bounds and complete
-metering remain CW-20261017-0021. Usage summary totals still aggregate successful
-calls; budget counters also include outstanding and other recorded outcomes.
+is unresolved; they do **not** yet bound a single attempt's dollar cost. Priced
+per-call bounds and complete metering remain CW-20261017-0021. Usage summary
+totals still aggregate successful calls; budget counters also include outstanding
+and other recorded outcomes.
 
 Memory storage is only for one process and loses state on restart. With budgets
 it refuses admission when history capacity is full instead of evicting accounting

@@ -86,6 +86,8 @@ plugins:
     # SQL reservations persist before dispatch; unresolved cost blocks other
     # matching spend attempts. A single call still has no hard dollar ceiling.
     # Missing/partial historical cost blocks matching spend budgets.
+    # Missing base rates refuse before dispatch (budget_price_unknown).
+    # Base pricing alone does not cover every cache/reasoning/tool charge.
     budgets:
       - id: caller-daily
         scope: principal                 # total | principal (keyed on verified caller identity)

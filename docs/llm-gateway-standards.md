@@ -175,13 +175,34 @@ window across processes/restarts; crashes leave outstanding rows counted. A pend
 or incomplete cost blocks another matching spend attempt until settlement or window
 expiry. These rows remain inspectable as `outcome: reserved` in usage reads.
 
-CW-20261017-0021 still owns priced per-call bounds, unknown-price admission before
-any usage, complete attempt metering and operator/provider-assisted reconciliation.
+Matching spend budgets now reject missing or unknown base rates before dispatch
+(`503 budget_price_unknown`), without consuming quota. Embeddings require input;
+generation requires input and output. The check uses the pinned attempt snapshot,
+honors model/principal filters, and cannot be bypassed by policy or a free tag.
+Rate validation uses `usageledger.PriceSnapshot.Validate`, including non-finite
+values. Unknown optional components remain distinct and can still produce partial
+cost on settlement. Legacy inline prices preserve their existing zero semantics;
+price files can represent each missing rate explicitly.
+
+CW-20261017-0021 still owns priced per-call bounds, request-specific rate/feature
+coverage, complete attempt metering and operator/provider-assisted reconciliation.
 A single call can exceed remaining dollars; this is not yet a hard spend ceiling.
 All workers must use the reservation path and consistent budget configuration.
 Memory storage is single-process only and stops budgeted admission at capacity.
 Usage totals retain their successful-call contract; budget counters also count
 outstanding and failed attempts. No costs here are subscription debits or bills.
+
+Provider documentation reviewed on 2026-10-18 reinforces that the current flat
+base rates are insufficient for a general upper bound. OpenAI's generated-token
+cap includes reasoning, but does not bound every other charge
+([reasoning guide](https://developers.openai.com/api/docs/guides/reasoning),
+[pricing](https://developers.openai.com/api/docs/pricing)). Anthropic documents
+distinct cache-write durations and feature pricing, while token counting is an
+estimate without caching logic
+([pricing](https://platform.claude.com/docs/en/about-claude/pricing),
+[token counting](https://platform.claude.com/docs/en/build-with-claude/token-counting)).
+The next bound implementation must identify supported request shapes and rate
+coverage, then refuse unsupported cases rather than promote an estimate to a cap.
 
 Effective target capability flags still use booleans with permissive defaults for
 uncataloged models. The catalog-match flag exposes missing data but does not yet
