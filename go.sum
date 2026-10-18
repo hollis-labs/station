@@ -26,8 +26,8 @@ github.com/hollis-labs/libs/app/app-host v0.1.0 h1:GE3sYmU+b7T3fnO549184XImzpT42
 github.com/hollis-labs/libs/app/app-host v0.1.0/go.mod h1:ATsdWo+B84KIvibQ1kEm2E6es18I8okxJB47R28uHFs=
 github.com/hollis-labs/libs/core/panics v0.1.0 h1:mWJ9yPTRCBsLFprCNGIJrroehfh/g3UaDmLEH6gncB8=
 github.com/hollis-labs/libs/core/panics v0.1.0/go.mod h1:KugNEagpx3eqC72FOyQrrTcIzGD+hJb+EXkSV6jP4jU=
-github.com/hollis-labs/libs/llm/core v0.2.0 h1:jYjfC4gsLbxsUG5mQ4ougbmUB0b9rQpqb85Vmb4CwQg=
-github.com/hollis-labs/libs/llm/core v0.2.0/go.mod h1:Hl8R2j3sR/mxfX8S/XBSxqcm7VM+RSVzH924gYXTyGw=
+github.com/hollis-labs/libs/llm/core v0.3.0 h1:cV6TGDQdiNNpmZobKAZdPdCjyujEpsUP4IlzuxnWIZw=
+github.com/hollis-labs/libs/llm/core v0.3.0/go.mod h1:7ggK4lyXpOBUpk/rdh+cYkh1EUPlP7RsETVi6JCBmDc=
 github.com/hollis-labs/libs/mcp/plugin-mcp v0.4.0 h1:o7MBd8kkpasHajKlfkQnXWEKrvWPx3gkUb+VnqzJAys=
 github.com/hollis-labs/libs/mcp/plugin-mcp v0.4.0/go.mod h1:7NTosm6go8xsgYj/VPyKzzPyptskPC7/6tkCv0EWQqI=
 github.com/hollis-labs/libs/security/auth v0.1.0 h1:Bq4pmTr4bnRY7a1bQq2ycuutRlCD4RCh44xPdb0PnBw=

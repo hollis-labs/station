@@ -141,6 +141,7 @@ func runStoreContract(t *testing.T, s Store) {
 		sampleEntry("e3", "alice", "p2", OutcomeFailedOver, base.Add(2*time.Minute), nil),
 		sampleEntry("e4", "alice", "p1", OutcomeOK, base.Add(3*time.Minute), f64(0.25)),
 	}
+	es[3].CostPartial = true
 	es[3].Detail = json.RawMessage(`{"k":{"v":1}}`)
 	if err := s.Add(ctx, es...); err != nil {
 		t.Fatal(err)
@@ -160,7 +161,7 @@ func runStoreContract(t *testing.T, s Store) {
 	// Round trip fidelity: the entry comes back as it went in.
 	got := all[3]
 	if got.CostUSD == nil || *got.CostUSD != 0.25 || got.Row.Price == nil || got.Row.Price.Source != "t" ||
-		!got.Row.Price.UnknownRates.Reasoning || got.Row.CostKind != usageledger.CostKindAPIEstimated {
+		!got.Row.Price.UnknownRates.Reasoning || !got.CostPartial || got.Row.CostKind != usageledger.CostKindAPIEstimated {
 		t.Fatalf("price/cost lost: %+v", got)
 	}
 	if got.Row.Usage.OutputTokens.Tokens != 5 || got.Row.Usage.CacheWriteTokens.Provenance != usageledger.ProvenanceUnknown {
@@ -188,7 +189,7 @@ func runStoreContract(t *testing.T, s Store) {
 	if err != nil || len(tot) != 1 {
 		t.Fatalf("totals %+v %v (only ok calls count, so only p1)", tot, err)
 	}
-	if tot[0].Calls != 3 || tot[0].Input != 30 || tot[0].Output != 15 || tot[0].UnpricedCalls != 1 || tot[0].CostUSD != 0.75 {
+	if tot[0].Calls != 3 || tot[0].Input != 30 || tot[0].Output != 15 || tot[0].UnpricedCalls != 2 || tot[0].CostUSD != 0.75 {
 		t.Fatalf("totals %+v", tot[0])
 	}
 	if tot, _ := s.Totals(ctx, Query{Principal: "bob"}); len(tot) != 1 || tot[0].Calls != 1 || tot[0].UnpricedCalls != 1 {

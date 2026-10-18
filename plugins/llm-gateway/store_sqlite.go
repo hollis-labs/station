@@ -97,7 +97,7 @@ func (s *sqliteStore) Recent(ctx context.Context, q Query) ([]Entry, error) {
 
 func (s *sqliteStore) Totals(ctx context.Context, q Query) ([]Total, error) {
 	w, args := sqliteWhere(q, "outcome='ok'")
-	rows, err := s.state.db.QueryContext(ctx, `SELECT provider,model,count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0),coalesce(sum(cost_usd),0),sum(cost_usd IS NULL) FROM gateway_usage`+w+` GROUP BY provider,model ORDER BY provider,model`, args...)
+	rows, err := s.state.db.QueryContext(ctx, `SELECT provider,model,count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0),coalesce(sum(cost_usd),0),sum(cost_usd IS NULL OR coalesce(json_extract(entry, '$.cost_partial'), 0)) FROM gateway_usage`+w+` GROUP BY provider,model ORDER BY provider,model`, args...)
 	if err != nil {
 		return nil, err
 	}

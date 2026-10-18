@@ -6,6 +6,13 @@ All notable user-facing changes land here.
 
 ### Changed
 
+- LLM gateway adopts `libs/llm/core v0.3.0`: catalog metadata preserves canonical
+  identity, type/status, provider request descriptions, reasoning controls, input
+  limits and pricing dimensions. Missing prices remain unknown; explicit zero
+  remains free. Catalog prices carry currency/unit and capability availability.
+- Usage totals count partial-cost calls in `unpriced_calls` across memory,
+  SQLite and PostgreSQL, retaining known cost components as lower bounds.
+
 - Moved to the `libs` monorepo: `mcp-host`, `go-mcp`, `plugin-sdk` and
   `api-projection` now come from `libs/mcp/plugin-mcp` v0.4.0. Inprocess
   logical servers need a trusted Init factory (protocol 2); `cmd/station`
