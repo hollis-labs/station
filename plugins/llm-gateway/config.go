@@ -218,7 +218,8 @@ type ProviderConfig struct {
 	Dialect string `yaml:"dialect" json:"dialect"`
 	// CatalogProvider overrides the models.dev provider ID used to look up
 	// model pricing, limits, and capabilities (e.g. "openrouter", "opencode",
-	// "huggingface"). Empty defaults to ID then Dialect.
+	// "huggingface"). Explicit mappings are authoritative. Empty uses ID and
+	// its conventional vendor alias; never the wire dialect.
 	CatalogProvider string `yaml:"catalog_provider" json:"catalog_provider"`
 	// BaseURL is the API root as the vendor documents it, including the
 	// version segment ("https://api.openai.com/v1").

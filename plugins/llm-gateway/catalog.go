@@ -21,13 +21,14 @@ const defaultCatalogTTL = 90 * time.Second
 // Catalog centralizes model metadata, capabilities, limits, modalities, and
 // pricing for the gateway using libs/llm/core/modelsdev and pricesource.
 type Catalog struct {
-	client     *modelsdev.Client
-	ttl        time.Duration
-	filePrices *pricesource.Table
-	livePrices pricesource.Live
-	mdPrices   costcalc.PriceSource
-	chain      costcalc.PriceSource
-	logger     *slog.Logger
+	client         *modelsdev.Client
+	ttl            time.Duration
+	refreshEnabled bool
+	filePrices     *pricesource.Table
+	livePrices     pricesource.Live
+	mdPrices       costcalc.PriceSource
+	chain          costcalc.PriceSource
+	logger         *slog.Logger
 }
 
 // TargetCapabilities reports the effective capabilities of a target or model,
@@ -99,9 +100,10 @@ func NewCatalog(cfg CatalogConfig, rt http.RoundTripper, logger *slog.Logger) (*
 	}
 
 	c := &Catalog{
-		ttl:        ttl,
-		filePrices: filePrices,
-		logger:     logger,
+		ttl:            ttl,
+		refreshEnabled: cfg.shouldRefresh(),
+		filePrices:     filePrices,
+		logger:         logger,
 	}
 
 	opts := []modelsdev.Option{
@@ -161,7 +163,50 @@ func (c *Catalog) LastFetchedAt() time.Time {
 	if c == nil || c.client == nil {
 		return time.Time{}
 	}
+	// The client loads disk state lazily. Read it before reporting freshness
+	// so the first request after a restart does not claim the cache is empty.
+	c.client.ListProviders()
 	return c.client.LastFetchedAt()
+}
+
+// CatalogStatus describes metadata freshness, not provider reachability,
+// workspace entitlement or whether the background worker is healthy.
+type CatalogStatus struct {
+	Source         string     `json:"source"`
+	State          string     `json:"state"` // empty, fresh, stale
+	RefreshEnabled bool       `json:"refresh_enabled"`
+	FetchedAt      *time.Time `json:"fetched_at,omitempty"`
+	AgeSeconds     *float64   `json:"age_seconds,omitempty"`
+	StaleAfter     *time.Time `json:"stale_after,omitempty"`
+}
+
+// Status reports the last usable snapshot. Stale metadata remains readable;
+// callers decide whether it is acceptable for their estimate or admission.
+func (c *Catalog) Status() CatalogStatus { return c.statusAt(time.Now()) }
+
+func (c *Catalog) statusAt(now time.Time) CatalogStatus {
+	s := CatalogStatus{Source: pricesource.SourceModelsDev, State: "empty"}
+	if c == nil || c.client == nil {
+		return s
+	}
+	s.RefreshEnabled = c.refreshEnabled
+	providers := c.client.ListProviders()
+	fetched := c.client.LastFetchedAt().UTC()
+	if !fetched.IsZero() {
+		expires := fetched.Add(c.TTL())
+		age := max(0, now.Sub(fetched).Seconds())
+		s.FetchedAt, s.AgeSeconds, s.StaleAfter = &fetched, &age, &expires
+	}
+	for _, p := range providers {
+		if len(p.Models) > 0 {
+			s.State = "stale"
+			if !fetched.IsZero() && now.Before(fetched.Add(c.TTL())) {
+				s.State = "fresh"
+			}
+			break
+		}
+	}
+	return s
 }
 
 func inferCatalogProvider(providerID string) string {
@@ -185,19 +230,26 @@ func inferCatalogProvider(providerID string) string {
 	return ""
 }
 
-func catalogProviderCandidates(catalogProvider, providerID, dialectName string) []string {
-	return []string{catalogProvider, providerID, inferCatalogProvider(providerID), dialectName}
+func catalogProviderCandidates(catalogProvider, providerID string) []string {
+	if catalogProvider != "" {
+		return []string{catalogProvider}
+	}
+	ids := []string{providerID}
+	if inferred := inferCatalogProvider(providerID); inferred != "" && inferred != providerID {
+		ids = append(ids, inferred)
+	}
+	return ids
 }
 
 // LookupModel looks up a model in the models.dev catalog. It checks any
-// explicit catalog_provider first, then the configured provider ID (and any
-// inferred vendor family such as "opencode" for "opencode-zen"), and falls back
-// to the provider's dialect name.
-func (c *Catalog) LookupModel(catalogProvider, providerID, dialectName, modelID string) (modelsdev.Model, string, bool) {
+// explicit catalog_provider exclusively, or the configured provider ID and
+// its conventional vendor alias (such as "opencode" for "opencode-zen").
+// A wire dialect never establishes a model's provider or commercial terms.
+func (c *Catalog) LookupModel(catalogProvider, providerID, modelID string) (modelsdev.Model, string, bool) {
 	if c == nil || c.client == nil {
 		return modelsdev.Model{}, "", false
 	}
-	for _, pid := range catalogProviderCandidates(catalogProvider, providerID, dialectName) {
+	for _, pid := range catalogProviderCandidates(catalogProvider, providerID) {
 		if pid == "" {
 			continue
 		}
@@ -222,19 +274,29 @@ func (c *Catalog) ResolvePrice(t *target) *usageledger.PriceSnapshot {
 	if c == nil || c.chain == nil {
 		return nil
 	}
-	var catProv, provID, dialectName string
+	var catProv, provID string
 	if t.provider != nil {
 		catProv = t.provider.catalogProvider
 		provID = t.provider.id
-		if t.provider.dialect != nil {
-			dialectName = t.provider.dialect.Name()
+	}
+	ids := catalogProviderCandidates(catProv, provID)
+	// Local account-specific overrides outrank every catalog source, including
+	// overrides keyed by the mapped catalog identity rather than the local ID.
+	if c.filePrices != nil {
+		for _, pid := range append([]string{provID}, ids...) {
+			if snap, ok := c.filePrices.Snapshot(pid, t.model); ok {
+				return &snap
+			}
 		}
 	}
-	for _, pid := range catalogProviderCandidates(catProv, provID, dialectName) {
+	for _, pid := range ids {
 		if pid == "" {
 			continue
 		}
-		if snap, ok := c.chain.Snapshot(pid, t.model); ok {
+		if snap, ok := c.livePrices.Snapshot(pid, t.model); ok {
+			return &snap
+		}
+		if snap, ok := c.mdPrices.Snapshot(pid, t.model); ok {
 			return &snap
 		}
 	}
@@ -254,13 +316,10 @@ func (c *Catalog) ResolveTargetDetails(t *target) (
 	if t == nil {
 		return llmtypes.ProviderCapabilities{}, TargetCapabilities{}, nil, nil, nil
 	}
-	var catProv, provID, dialectName string
+	var catProv, provID string
 	if t.provider != nil {
 		catProv = t.provider.catalogProvider
 		provID = t.provider.id
-		if t.provider.dialect != nil {
-			dialectName = t.provider.dialect.Name()
-		}
 	}
 
 	// Start with permissive defaults for uncataloged models.
@@ -271,7 +330,7 @@ func (c *Catalog) ResolveTargetDetails(t *target) (
 	attachment := false
 	temperature := false
 
-	if md, _, ok := c.LookupModel(catProv, provID, dialectName, t.model); ok {
+	if md, _, ok := c.LookupModel(catProv, provID, t.model); ok {
 		tools = md.Capabilities.ToolCall
 		vision = hasVisionModality(md)
 		reasoning = md.Capabilities.Reasoning

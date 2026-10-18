@@ -118,9 +118,9 @@ plugins:
   llm-gateway:
 %s
     providers:
-      - {id: o1, dialect: openai, base_url: "%s/v1", api_key_env: TEST_O1_KEY}
-      - {id: o2, dialect: openai, base_url: "%s/v1"}
-      - {id: an, dialect: anthropic, base_url: "%s/v1", api_key_env: TEST_AN_KEY}
+      - {id: o1, dialect: openai, catalog_provider: openai, base_url: "%s/v1", api_key_env: TEST_O1_KEY}
+      - {id: o2, dialect: openai, catalog_provider: openai, base_url: "%s/v1"}
+      - {id: an, dialect: anthropic, catalog_provider: anthropic, base_url: "%s/v1", api_key_env: TEST_AN_KEY}
       - {id: emb, dialect: openai, base_url: "%s/v1", api_key_ref: "test://emb/key"}
       - {id: jv, dialect: jev, base_url: "%s/v1", api_key_env: TEST_JV_KEY}
     models:

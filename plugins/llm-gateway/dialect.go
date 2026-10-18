@@ -84,19 +84,21 @@ type ModelInfo struct {
 // TargetInfo describes one target behind a model alias, its breaker state, and
 // its resolved capabilities, pricing, limits, modalities, and metadata.
 type TargetInfo struct {
-	Operations   []Operation                `json:"operations,omitempty"`
-	Provider     string                     `json:"provider"`
-	Model        string                     `json:"model"`
-	Dialect      string                     `json:"dialect"`
-	Tags         []string                   `json:"tags,omitempty"`
-	BestEffort   bool                       `json:"best_effort,omitempty"`
-	Reachable    bool                       `json:"reachable"`
-	State        string                     `json:"state"`
-	Capabilities *TargetCapabilities        `json:"capabilities,omitempty"`
-	Price        *usageledger.PriceSnapshot `json:"price,omitempty"`
-	Limits       *modelsdev.Limits          `json:"limits,omitempty"`
-	Modalities   *modelsdev.Modality        `json:"modalities,omitempty"`
-	Metadata     *ModelMetadata             `json:"metadata,omitempty"`
+	Operations      []Operation                `json:"operations,omitempty"`
+	Provider        string                     `json:"provider"`
+	Model           string                     `json:"model"`
+	Dialect         string                     `json:"dialect"`
+	CatalogProvider string                     `json:"catalog_provider,omitempty"`
+	CatalogMatched  bool                       `json:"catalog_matched"`
+	Tags            []string                   `json:"tags,omitempty"`
+	BestEffort      bool                       `json:"best_effort,omitempty"`
+	Reachable       bool                       `json:"reachable"`
+	State           string                     `json:"state"`
+	Capabilities    *TargetCapabilities        `json:"capabilities,omitempty"`
+	Price           *usageledger.PriceSnapshot `json:"price,omitempty"`
+	Limits          *modelsdev.Limits          `json:"limits,omitempty"`
+	Modalities      *modelsdev.Modality        `json:"modalities,omitempty"`
+	Metadata        *ModelMetadata             `json:"metadata,omitempty"`
 }
 
 // Meta is what the gateway reads from a request, never more.
