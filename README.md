@@ -263,26 +263,46 @@ and PII rules, failing closed to an `oversized` tombstone when a payload exceeds
 `ledger.capture.max_bytes`) and stores them in `detail` alongside the redaction
 audit report.
 
-Budgets and local routes: `budgets` uses `llm/core/quota` (`SeededStore` + `Limiter`)
-over `day`, `week`, `month` or rolling windows, scoped by `total` or verified
-`principal` (`max_usd` and/or `max_requests`), seeded on first use
-from the ledger's complete retained window (not the usage API's recent-page limit),
-and updated when each dispatched attempt finishes, including failed, interrupted
-and canceled attempts. Configured budgets are enforced independently of policy
-mode or ordered allow rules: exhaustion returns `429 budget_exceeded` with
-`Retry-After` when known. Counter/history failures return `503 budget_unavailable`.
-Missing or partial cost in a matching spend window returns
-`503 budget_cost_unknown`; a known zero cost remains free. These checks also run
-before fallback attempts. A `free` tag or policy allow rule cannot bypass them;
-use budget model filters to exclude a separate local alias when appropriate.
+Budgets use `llm/core/quota` window and limit math over `day`, `week`, `month`
+or rolling windows, scoped by `total` or verified `principal` (`max_usd` and/or
+`max_requests`). Admission reads the complete retained ledger window and commits
+an `outcome: reserved` row before dispatch. PostgreSQL serializes check-and-insert
+with a transaction advisory lock; SQLite uses an immediate transaction. All
+matching budgets must admit before any row is written. The lock is released before
+contacting the provider. All workers sharing a ledger must use this reservation
+path and consistent budget configuration for cross-process request limits.
 
-Rates are captured before each upstream attempt. Concurrent catalog refreshes
-cannot change that attempt's price, including an initially unknown price. These
-are still checks over completed usage, not reserved capacity: concurrent calls,
-in-flight work at a crash, and a single call larger than the remaining spend can
-overshoot. Durable reservation/reconciliation remains CW-20261017-0021. Usage
-summary totals still aggregate successful calls; budget counters also include
-other outcomes. They are intentionally different views.
+Configured budgets enforce independently of policy mode and ordered allow rules.
+Exhaustion returns `429 budget_exceeded` with `Retry-After` when known. Store
+failures return `503 budget_unavailable`. Unresolved, missing or partial cost in
+a matching spend window returns `503 budget_cost_unknown`; a known zero cost
+remains free. A `free` tag cannot bypass a budget; use budget model filters to
+exclude a separate local alias when appropriate. Every fallback needs its own
+reservation and consumes another request slot.
+
+Completion atomically replaces the reservation with its usage and outcome,
+including failures and cancellations. ID, admission time, identity and captured
+price stay fixed. Identical settlement retries are safe; conflicting retries are
+refused. Budgeted writes bypass the asynchronous usage queue. A crash, ambiguous
+commit or settlement failure leaves the reservation counted until settlement or
+window expiry; it is never assumed free. The retained row remains visible in
+`/v1/usage` even after its window expires. `recorded_at` for reserved attempts is
+admission time, so a long call settles into the window in which it started.
+
+Request limits now cover in-flight attempts across processes and restarts with
+SQL storage. Spend limits conservatively block overlapping attempts while cost
+is unresolved; they do **not** yet bound a single attempt's dollar cost or refuse
+all unpriced models before their first call. Priced per-call bounds and complete
+metering remain CW-20261017-0021. Usage summary totals still aggregate successful
+calls; budget counters also include outstanding and other recorded outcomes.
+
+Memory storage is only for one process and loses state on restart. With budgets
+it refuses admission when history capacity is full instead of evicting accounting
+records; use SQLite or PostgreSQL for shared use. Keep all ledger rows for at least
+the longest configured budget window. Do not delete unresolved rows to unblock
+spend without independently establishing the actual usage. No operator settlement
+API or provider-billing recovery job is included yet. Deployments with no budgets
+retain asynchronous usage recording and its existing loss/overflow limits.
 
 Targets carry `tags` (`local`, `free`, `paid`) and `best_effort: true`
 (`CW-20261011-0099`: fast 1.5s header timeout + threshold-1 breaker so a sleeping or

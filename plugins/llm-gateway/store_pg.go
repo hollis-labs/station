@@ -117,6 +117,14 @@ const insertEntry = `INSERT INTO llm_calls
 	ON CONFLICT (id) DO NOTHING`
 
 func (s *pgStore) Add(ctx context.Context, entries ...Entry) error {
+	return addPG(ctx, s.pool, entries...)
+}
+
+type pgBatcher interface {
+	SendBatch(context.Context, *pgx.Batch) pgx.BatchResults
+}
+
+func addPG(ctx context.Context, db pgBatcher, entries ...Entry) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -142,7 +150,7 @@ func (s *pgStore) Add(ctx context.Context, entries ...Entry) error {
 			e.Dialect, e.Alias, e.Row.Provider, e.Row.Model, e.Status, e.Outcome, e.Streamed, e.LatencyMS,
 			usage, price, string(e.Row.CostKind), e.CostUSD, e.CostPartial, detail, e.ConversationID)
 	}
-	res := s.pool.SendBatch(ctx, batch)
+	res := db.SendBatch(ctx, batch)
 	defer res.Close()
 	for range entries {
 		if _, err := res.Exec(); err != nil {
@@ -159,6 +167,10 @@ func where(q Query, extra string) (string, []any) {
 	if extra != "" {
 		conds = append(conds, extra)
 	}
+	if q.ID != "" {
+		args = append(args, q.ID)
+		conds = append(conds, fmt.Sprintf("id = $%d", len(args)))
+	}
 	if q.Principal != "" {
 		args = append(args, q.Principal)
 		conds = append(conds, fmt.Sprintf("principal = $%d", len(args)))
@@ -174,6 +186,14 @@ func where(q Query, extra string) (string, []any) {
 }
 
 func (s *pgStore) Recent(ctx context.Context, q Query) ([]Entry, error) {
+	return recentPG(ctx, s.pool, q)
+}
+
+type pgReader interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
+func recentPG(ctx context.Context, db pgReader, q Query) ([]Entry, error) {
 	w, args := where(q, "")
 	limit := q.Limit
 	if limit <= 0 {
@@ -184,7 +204,7 @@ func (s *pgStore) Recent(ctx context.Context, q Query) ([]Entry, error) {
 		args = append(args, limit)
 		limitSQL = fmt.Sprintf(" LIMIT $%d", len(args))
 	}
-	rows, err := s.pool.Query(ctx, fmt.Sprintf(`SELECT id, recorded_at, request_id, principal, verified, operation, dialect,
+	rows, err := db.Query(ctx, fmt.Sprintf(`SELECT id, recorded_at, request_id, principal, verified, operation, dialect,
 		alias, provider, model, status, outcome, streamed, latency_ms, usage, price, cost_kind, cost_usd, cost_partial, detail, conversation_id
 		FROM (SELECT * FROM llm_calls%s ORDER BY recorded_at DESC, id DESC%s) recent
 		ORDER BY recorded_at, id`, w, limitSQL), args...)

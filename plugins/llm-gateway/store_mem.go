@@ -40,6 +40,9 @@ func (m *memStore) Add(_ context.Context, entries ...Entry) error {
 }
 
 func matches(e Entry, q Query) bool {
+	if q.ID != "" && e.ID != q.ID {
+		return false
+	}
 	if q.Principal != "" && e.Row.SessionID != q.Principal {
 		return false
 	}

@@ -220,7 +220,8 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 // openStore builds the configured ledger store. The durable store is wrapped
-// so the database is never on the request path.
+// for asynchronous unbudgeted usage; budget reservations and settlement bypass
+// that queue and require synchronous database access.
 func openStore(ctx context.Context, cfg LedgerConfig, reg *platform.PluginRegistry) (Store, error) {
 	if cfg.Store == "sqlite" {
 		s, err := openSQLiteStore(ctx, cfg.SQLite.Path)

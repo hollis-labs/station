@@ -43,6 +43,7 @@ type provider struct {
 }
 
 type target struct {
+	reservation   *Entry // set only on a per-attempt copy, never a shared route
 	provider      *provider
 	model         string
 	operations    []Operation
@@ -180,7 +181,7 @@ func (g *Gateway) record(rec Record) {
 		return
 	}
 	e := g.ledger.Add(rec)
-	if g.budgets != nil {
+	if g.budgets != nil && rec.Target.reservation == nil {
 		if err := g.budgets.Record(e); err != nil {
 			g.logger.Error("budget.record_failed", "request_id", rec.RequestID)
 		}
@@ -385,16 +386,11 @@ func (g *Gateway) relay(w http.ResponseWriter, r *http.Request, d Dialect, op Op
 		)
 		if t.headerTimeout > 0 {
 			reqCtx, cancelAttempt = context.WithCancel(r.Context())
-			headerTimer = time.AfterFunc(t.headerTimeout, func() {
-				headerExpired.Store(true)
-				cancelAttempt()
-			})
 		}
 
 		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, t.provider.baseURL+upDialect.UpstreamPath(op), bytes.NewReader(out))
 		if err != nil {
-			if headerTimer != nil {
-				headerTimer.Stop()
+			if cancelAttempt != nil {
 				cancelAttempt()
 			}
 			ticket.Release()
@@ -420,6 +416,29 @@ func (g *Gateway) relay(w http.ResponseWriter, r *http.Request, d Dialect, op Op
 			attempt.price = &price
 		}
 		t = &attempt
+		reservation, bstat, reserveErr := g.budgets.Reserve(reqCtx, caller, requestID, meta.Model, op, d.Name(), t, meta.Stream)
+		if reserveErr != nil || bstat.State != "ok" {
+			if cancelAttempt != nil {
+				cancelAttempt()
+			}
+			ticket.Release()
+			refusal := budgetRefusal(bstat)
+			if reserveErr != nil {
+				refusal = policyRefusal{status: http.StatusServiceUnavailable, code: "budget_unavailable", message: "usage budget could not be reserved"}
+			}
+			if refusal.retryAfter > 0 {
+				w.Header().Set("Retry-After", strconv.Itoa(refusal.retryAfter))
+			}
+			g.refuse(w, d, caller, requestID, meta.Model, refusal.status, refusal.code, refusal.message)
+			return
+		}
+		t.reservation = reservation
+		if t.headerTimeout > 0 {
+			headerTimer = time.AfterFunc(t.headerTimeout, func() {
+				headerExpired.Store(true)
+				cancelAttempt()
+			})
+		}
 		resp, err := t.provider.client.Do(req)
 		if headerTimer != nil {
 			headerTimer.Stop()
@@ -932,7 +951,7 @@ func (g *Gateway) UsageHandler() http.Handler {
 
 // checkBudget enforces configured budgets independently of policy evaluation.
 func (g *Gateway) checkBudget(w http.ResponseWriter, r *http.Request, d Dialect, caller Caller, requestID, model string) (BudgetStatus, bool) {
-	status, err := g.budgets.Check(r.Context(), caller, model)
+	status, err := g.budgets.CheckStored(r.Context(), caller, model)
 	if err != nil {
 		g.refuse(w, d, caller, requestID, model, http.StatusServiceUnavailable, "budget_unavailable", "usage budget could not be evaluated")
 		return status, false

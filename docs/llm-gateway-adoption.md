@@ -284,8 +284,11 @@ capture feature. JEV's bounded decision answers remain part of its usage detail.
 No budget limits are configured for this dogfood service. Policy and auth are
 enforced, but an authorized inference client can spend against configured
 providers. Cost figures are API-rate estimates when known, not subscription
-charges; unknown cost is not zero. Hard budget reservations, comprehensive
-telemetry, and portfolio activity-event integration remain separate work.
+charges; unknown cost is not zero. The source supports durable request
+reservations when budgets are configured;
+that path has not yet been enabled or deployed on this dogfood service. Hard dollar
+bounds, comprehensive telemetry, and portfolio activity-event integration remain
+separate work.
 
 A local ledger backup is kept under `~/.local/state/station/backups/`; the
 initial dump was verified with `pg_restore --list`. This is not a scheduled or

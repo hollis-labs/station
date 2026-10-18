@@ -83,6 +83,8 @@ plugins:
       # cache_dir: ~/.cache/go-modelsdev
       # price_file: ./custom-prices.json # optional table, reloaded via POST /v1/catalog/prices/reload
     # Budgets always enforce, including when policy.mode is shadow.
+    # SQL reservations persist before dispatch; unresolved cost blocks other
+    # matching spend attempts. A single call still has no hard dollar ceiling.
     # Missing/partial historical cost blocks matching spend budgets.
     budgets:
       - id: caller-daily

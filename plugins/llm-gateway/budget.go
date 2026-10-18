@@ -80,6 +80,10 @@ func (b compiledBudget) reqLimit(callerID string) quota.Limit {
 // Budgets tracks call counts and USD spend over calendar or rolling windows,
 // seeded from the ledger store so restarts do not reset active windows.
 type Budgets struct {
+	cfgs    []BudgetConfig
+	store   Store
+	clock   quota.Clock
+	horizon time.Duration
 	items   []compiledBudget
 	seeded  *quota.SeededStore
 	limiter *quota.Limiter
@@ -146,6 +150,7 @@ func NewBudgets(cfgs []BudgetConfig, store Store, clock quota.Clock) (*Budgets, 
 		})
 	}
 	b := &Budgets{
+		cfgs: append([]BudgetConfig(nil), cfgs...), store: store, clock: clock, horizon: horizon,
 		items: items,
 		seen:  map[string]bool{},
 	}
