@@ -436,8 +436,8 @@ func (c *Config) Validate() error {
 			if t.TimeoutMS < 0 {
 				return fmt.Errorf("llm-gateway: model %q: negative target timeout_ms", m.Name)
 			}
-			if t.Price != nil && (t.Price.InputPerMillion < 0 || t.Price.OutputPerMillion < 0 || t.Price.CacheReadPerMillion < 0 || t.Price.CacheWritePerMillion < 0 || t.Price.ReasoningPerMillion < 0) {
-				return fmt.Errorf("llm-gateway: model %q: negative price", m.Name)
+			if t.Price != nil && snapshot(t.Price).Validate() != nil {
+				return fmt.Errorf("llm-gateway: model %q: price rates must be finite and non-negative", m.Name)
 			}
 		}
 	}

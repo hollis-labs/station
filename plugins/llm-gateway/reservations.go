@@ -113,6 +113,10 @@ func (b *Budgets) Reserve(ctx context.Context, caller Caller, requestID, alias s
 		if status.State != "ok" {
 			return errBudgetRefused
 		}
+		if priced := b.checkPrice(caller, alias, op, e.Row.Price); priced.State != "ok" {
+			status = priced
+			return errBudgetRefused
+		}
 		return nil
 	})
 	if errors.Is(err, errBudgetRefused) {

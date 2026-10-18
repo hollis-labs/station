@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/libs/llm/core/quota"
+	"github.com/hollis-labs/libs/llm/core/usageledger"
 )
 
 const (
@@ -20,7 +21,8 @@ const (
 // to a call. Spend math and windows live here in the quota module; policy
 // receives this summary as facts on llm.invoke.
 type BudgetStatus struct {
-	// State is "ok", "exhausted", or "unknown" (incomplete spend history).
+	// State is "ok", "exhausted", "unknown" (incomplete spend history), or
+	// "price_unknown" (this attempt lacks usable base token rates).
 	State   string
 	Unknown []string
 	// Exhausted lists the IDs of budgets that refused the call.
@@ -325,4 +327,40 @@ func (b compiledBudget) unknownLimit(callerID string) quota.Limit {
 
 func validBudgetUSD(v float64) bool {
 	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0 && v < float64(math.MaxInt64)/1e6
+}
+
+// checkPrice is a prerequisite, not an estimate or upper bound. Every inference
+// operation needs input pricing; generation also needs output pricing. Optional
+// cache/reasoning rates are checked by the usage pricer when those tokens occur.
+// Neither permissive capability defaults nor a "free" route tag establish rates.
+func (b *Budgets) checkPrice(caller Caller, model string, op Operation, price *usageledger.PriceSnapshot) BudgetStatus {
+	status := BudgetStatus{State: "ok"}
+	if b == nil || usableBasePrice(op, price) {
+		return status
+	}
+	principal := caller.ID
+	if !caller.Known || principal == "" {
+		principal = "anonymous"
+	}
+	for _, item := range b.items {
+		if item.maxMicros > 0 && item.matches(principal, model) {
+			status.State = "price_unknown"
+			status.Unknown = append(status.Unknown, item.cfg.ID)
+		}
+	}
+	return status
+}
+
+func usableBasePrice(op Operation, price *usageledger.PriceSnapshot) bool {
+	if price == nil || price.Validate() != nil || price.UnknownRates.UncachedInput {
+		return false
+	}
+	switch op {
+	case OpEmbed:
+		return true
+	case OpChat, OpResponses, OpDecide:
+		return !price.UnknownRates.Output
+	default:
+		return false
+	}
 }

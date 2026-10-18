@@ -14,10 +14,11 @@ import (
 	"time"
 
 	"github.com/hollis-labs/libs/llm/core/quota"
+	"github.com/hollis-labs/libs/llm/core/usageledger"
 )
 
 func reserveTestAttempt(b *Budgets, ctx context.Context, principal string) (*Entry, BudgetStatus, error) {
-	return b.Reserve(ctx, Caller{ID: principal, Known: true}, "request", "fast", OpChat, "openai", &target{provider: &provider{id: "openai"}, model: "m"}, false)
+	return b.Reserve(ctx, Caller{ID: principal, Known: true}, "request", "fast", OpChat, "openai", &target{provider: &provider{id: "openai"}, model: "m", price: &usageledger.PriceSnapshot{}}, false)
 }
 
 func runReservationConcurrency(t *testing.T, open func() Store) {
