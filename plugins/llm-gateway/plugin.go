@@ -172,6 +172,7 @@ func (p *Plugin) Register(ctx context.Context, reg *platform.PluginRegistry, dec
 		{Method: "POST", Path: "/v1/catalog/refresh", Scope: ScopeCatalogWrite, Handler: gw.CatalogRefreshHandler()},
 		{Method: "POST", Path: "/v1/catalog/prices/reload", Scope: ScopeCatalogWrite, Handler: gw.CatalogPricesReloadHandler()},
 		{Method: "GET", Path: "/v1/usage", Scope: ScopeUsageRead, Handler: gw.UsageHandler()},
+		{Method: "GET", Path: "/v1/usage/export", Scope: ScopeUsageRead, Handler: gw.UsageExportHandler()},
 	} {
 		if err := reg.Mount(rt); err != nil {
 			return err

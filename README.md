@@ -77,6 +77,15 @@ only the HTTP API. No MCP config, demo server, or MCP listener is loaded.
 See [the adoption guide](docs/llm-gateway-adoption.md) for the local endpoint,
 per-app credentials, conversation headers, native API families, and live probes.
 
+## Subscription and API usage monitoring
+
+The opt-in `usage-monitor` HTTP plugin records subscription allowance snapshots
+and token/cost history for other apps to query. It includes Claude, Codex,
+Antigravity and OpenCode Go collectors, paginated gateway history import, and
+principal-bound ingestion for other providers and devices. Account management,
+collection and reads use separate scopes. See the [API and deployment guide](plugins/usage-monitor/README.md)
+and [example configuration](usage-monitor.example.yaml).
+
 ## SQLite gateway state
 
 The optional SQLite store backs the LLM gateway management API.

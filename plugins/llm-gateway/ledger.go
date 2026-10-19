@@ -84,7 +84,8 @@ type Total struct {
 
 // Query selects ledger entries. Zero fields select everything.
 type Query struct {
-	ID string // internal exact-entry lookup; not exposed by the HTTP query parser
+	ID     string       // internal exact-entry lookup; not exposed by the HTTP query parser
+	Before *UsageCursor // exclusive keyset boundary for history exports
 	// Limit is the read cap; -1 requests the complete retained history for internal budget seeding.
 	// The HTTP usage endpoint accepts only bounded positive limits.
 	Limit     int

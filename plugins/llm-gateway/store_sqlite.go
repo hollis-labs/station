@@ -59,6 +59,10 @@ VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING`, e.ID, e.Row.RecordedAt.
 func sqliteWhere(q Query, extra string) (string, []any) {
 	var clauses []string
 	var args []any
+	if q.Before != nil {
+		clauses = append(clauses, "(recorded_at,id)<(?,?)")
+		args = append(args, q.Before.At.UnixNano(), q.Before.ID)
+	}
 	if extra != "" {
 		clauses = append(clauses, extra)
 	}
