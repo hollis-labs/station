@@ -72,6 +72,11 @@ func (d ManagementDocument) Validate() error {
 			return errors.New("invalid ledger secret reference")
 		}
 	}
+	if ref := d.Gateway.Ledger.Postgres.PasswordRef; ref != "" {
+		if _, err := secrets.ParseRef(ref); err != nil {
+			return errors.New("invalid ledger password reference")
+		}
+	}
 	return nil
 }
 

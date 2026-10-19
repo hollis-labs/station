@@ -3,6 +3,7 @@ package llmgateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -95,7 +96,9 @@ func TestCatalogFetchControlsKeepLastGood(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	c, err := NewCatalog(CatalogConfig{URL: srv.URL, CacheDir: t.TempDir(), RefreshTimeout: "30ms", MaxResponseBytes: 1024}, nil, quiet)
+	// Successful and oversized responses need time to complete under race-enabled
+	// CI. The stalled handler still exercises the configured refresh deadline.
+	c, err := NewCatalog(CatalogConfig{URL: srv.URL, CacheDir: t.TempDir(), RefreshTimeout: "2s", MaxResponseBytes: 1024}, nil, quiet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,8 +108,15 @@ func TestCatalogFetchControlsKeepLastGood(t *testing.T) {
 	first := c.LastFetchedAt()
 	for _, m := range []int32{1, 2} {
 		mode.Store(m)
-		if err := c.Refresh(t.Context()); err == nil {
+		err := c.Refresh(t.Context())
+		if err == nil {
 			t.Fatal("invalid fetch succeeded")
+		}
+		if m == 1 && c.Status().Sync.LastError != "response_too_large" {
+			t.Fatalf("oversized response failed for the wrong reason: %v", err)
+		}
+		if m == 2 && !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("stalled response did not reach its deadline: %v", err)
 		}
 		if s := c.Status(); s.Sync.LastError == "" || !s.FetchedAt.Equal(first) || len(c.ListModels("", "", "")) != 1 {
 			t.Fatalf("last good snapshot lost: %+v", s)

@@ -182,8 +182,16 @@ type CaptureConfig struct {
 // is a secret reference (or an environment variable), never a literal. Point it
 // at a database and role dedicated to the ledger.
 type PostgresConfig struct {
-	DSNRef string `yaml:"dsn_ref" json:"dsn_ref"`
-	DSNEnv string `yaml:"dsn_env" json:"dsn_env"`
+	DSNRef      string `yaml:"dsn_ref" json:"dsn_ref"`
+	DSNEnv      string `yaml:"dsn_env" json:"dsn_env"`
+	Host        string `yaml:"host,omitempty" json:"host,omitempty"`
+	Port        int    `yaml:"port,omitempty" json:"port,omitempty"`
+	Database    string `yaml:"database,omitempty" json:"database,omitempty"`
+	User        string `yaml:"user,omitempty" json:"user,omitempty"`
+	PasswordRef string `yaml:"password_ref,omitempty" json:"password_ref,omitempty"`
+	Schema      string `yaml:"schema,omitempty" json:"schema,omitempty"`
+	// Structured connections default to verify; legacy DSNs retain auto migration.
+	SchemaMode string `yaml:"schema_mode,omitempty" json:"schema_mode,omitempty"`
 }
 
 type SQLiteConfig struct {
@@ -205,8 +213,8 @@ func (l LedgerConfig) validate() error {
 			return fmt.Errorf("llm-gateway: ledger.sqlite.path must be absolute and clean")
 		}
 	case "postgres":
-		if (l.Postgres.DSNRef == "") == (l.Postgres.DSNEnv == "") {
-			return fmt.Errorf("llm-gateway: ledger.postgres needs exactly one of dsn_ref or dsn_env")
+		if err := l.Postgres.validate(); err != nil {
+			return err
 		}
 	default:
 		return fmt.Errorf("llm-gateway: ledger.store must be memory, postgres or sqlite")

@@ -43,13 +43,15 @@ func run(args []string) int {
 		return runSecret(rest)
 	case "gateway-store":
 		return runGatewayStore(rest)
+	case "ledger-migrate":
+		return runLedgerMigrate(rest)
 	case "client":
 		return runClient(rest)
 	case "version":
 		fmt.Println("station " + version)
 		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "station: unknown subcommand %q\n\nUsage: station [serve|validate|list|secret|client|gateway-store|version] [flags]\n", cmd)
+		fmt.Fprintf(os.Stderr, "station: unknown subcommand %q\n\nUsage: station [serve|validate|list|secret|client|gateway-store|ledger-migrate|version] [flags]\n", cmd)
 		return 2
 	}
 }

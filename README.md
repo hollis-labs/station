@@ -50,6 +50,7 @@ The CLI is the operator/ops surface:
   id, name, transport, and (for `inprocess`) its manifest-declared tool
   names, without spawning or dialing anything.
 - `station gateway-store` — import, stage, inspect and select SQLite gateway revisions.
+- `station ledger-migrate` — apply PostgreSQL ledger migrations with a separate migration credential, without starting providers or the HTTP service.
 - `station client` — issue/list/revoke hashed credentials in YAML or a gateway database.
 - `station version` — print the build version.
 
@@ -85,6 +86,59 @@ Antigravity and OpenCode Go collectors, paginated gateway history import, and
 principal-bound ingestion for other providers and devices. Account management,
 collection and reads use separate scopes. See the [API and deployment guide](plugins/usage-monitor/README.md)
 and [example configuration](usage-monitor.example.yaml).
+
+## PostgreSQL runtime and migration credentials
+
+For a managed PostgreSQL database, configure public connection metadata and a
+password reference separately. Structured connections require native TLS with
+hostname and public-CA verification; they default to schema verification only:
+
+```yaml
+ledger:
+  store: postgres
+  postgres:
+    host: postgres.example.test
+    port: 5432
+    database: application_ledger
+    user: application_runtime
+    password_ref: file:///private/credentials/runtime-password
+    schema: public
+    schema_mode: verify
+```
+
+The runtime needs schema USAGE, SELECT on `llm_ledger_schema`, and SELECT, INSERT
+and UPDATE on `llm_calls`. It does not need schema CREATE, table ownership or the
+migration credential. Verification uses a read-only transaction, requires the
+complete current migration history and checks the runtime column names. Missing,
+older, newer or incomplete schemas fail startup with migration guidance; verify
+mode never repairs them. This is a compatibility check, not a complete schema
+drift audit.
+
+Run migrations as a separate deployment step using a login allowed to SET ROLE
+the non-login, non-administrative owner. The schema must already exist:
+
+```sh
+station ledger-migrate -host postgres.example.test -port 5432 \
+  -database application_ledger -schema public -user application_migrator \
+  -password-ref file:///private/credentials/migration-password \
+  -owner-role application_owner
+```
+
+The command resolves only this database credential, takes the migration advisory
+lock, creates objects as the owner and exits. Configure owner default privileges
+for future runtime-accessible objects through the database administrator. The
+serving process should receive only the runtime reference. Credential rotation
+updates the login/reference together, followed by restart and authenticated
+read/write verification before the old login is retired.
+
+Existing `dsn_ref` and `dsn_env` configurations retain automatic startup migration
+unless explicitly set to `schema_mode: verify`. Do not mix DSN and structured
+fields. `ledger-migrate -dsn-ref ... -owner-role ...` supports legacy migration
+DSNs, including their existing TLS/search-path settings; the mandatory TLS
+contract applies to structured connections. PostgreSQL provisioning, role/grant
+changes, existing-database adoption and credential rotation belong to the
+infrastructure administrator rather than this command. None of these options
+automatically switches an existing deployment or transfers its ownership.
 
 ## SQLite gateway state
 
