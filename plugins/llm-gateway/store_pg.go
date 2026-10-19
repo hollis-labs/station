@@ -61,6 +61,10 @@ const migrationLock = 7301160 // arbitrary, stable: serializes concurrent starte
 
 // openPGStore connects, migrates and returns a store.
 func openPGStore(ctx context.Context, dsn string) (*pgStore, error) {
+	return openPGStoreMode(ctx, dsn, "auto")
+}
+
+func connectPGStore(ctx context.Context, dsn string) (*pgStore, error) {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		// The error text can echo the DSN's host and user; the password is
@@ -71,22 +75,94 @@ func openPGStore(ctx context.Context, dsn string) (*pgStore, error) {
 		pool.Close()
 		return nil, fmt.Errorf("llm-gateway: ledger: postgres unreachable: %w", scrub(err))
 	}
-	s := &pgStore{pool: pool}
-	if err := s.migrate(ctx); err != nil {
-		pool.Close()
+	return &pgStore{pool: pool}, nil
+}
+
+func openPGStoreMode(ctx context.Context, dsn, mode string) (*pgStore, error) {
+	if mode != "auto" && mode != "verify" {
+		return nil, fmt.Errorf("llm-gateway: ledger: invalid schema mode")
+	}
+	s, err := connectPGStore(ctx, dsn)
+	if err != nil {
+		return nil, err
+	}
+	if mode == "verify" {
+		err = s.verifySchema(ctx)
+	} else {
+		err = s.migrate(ctx)
+	}
+	if err != nil {
+		s.Close()
 		return nil, err
 	}
 	return s, nil
 }
 
+func (s *pgStore) verifySchema(ctx context.Context) error {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return fmt.Errorf("llm-gateway: ledger: begin schema verification failed")
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var count, first, last int
+	if err = tx.QueryRow(ctx, `SELECT count(*),coalesce(min(version),0),coalesce(max(version),0) FROM llm_ledger_schema`).Scan(&count, &first, &last); err != nil {
+		return fmt.Errorf("llm-gateway: ledger: schema unavailable; run station ledger-migrate with the migration identity")
+	}
+	if count != len(pgMigrations) || first != 1 || last != len(pgMigrations) {
+		return fmt.Errorf("llm-gateway: ledger: schema does not match binary v%d; run station ledger-migrate with the matching binary and migration identity", len(pgMigrations))
+	}
+	// Resolve the full runtime row shape without reading any application rows.
+	rows, err := tx.Query(ctx, `SELECT id,recorded_at,request_id,principal,verified,operation,dialect,alias,provider,model,status,outcome,streamed,latency_ms,usage,price,cost_kind,cost_usd,cost_partial,detail,conversation_id,cost_bound FROM llm_calls LIMIT 0`)
+	if err != nil {
+		return fmt.Errorf("llm-gateway: ledger: runtime schema is unavailable or incompatible")
+	}
+	rows.Close()
+	if rows.Err() != nil {
+		return fmt.Errorf("llm-gateway: ledger: runtime schema verification failed")
+	}
+	return tx.Commit(ctx)
+}
+
 func scrub(err error) error { return fmt.Errorf("%s", strings.ReplaceAll(err.Error(), "\n", " ")) }
 
 func (s *pgStore) migrate(ctx context.Context) error {
+	return s.migrateAs(ctx, "")
+}
+
+func (s *pgStore) migrateAs(ctx context.Context, owner string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("llm-gateway: ledger: begin migration: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	if owner != "" {
+		var safe bool
+		if err := tx.QueryRow(ctx, `SELECT NOT (rolcanlogin OR rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname=$1`, owner).Scan(&safe); err != nil || !safe {
+			return fmt.Errorf("llm-gateway: ledger: owner must be a non-login, non-administrative role")
+		}
+		if _, err := tx.Exec(ctx, "SET LOCAL ROLE "+pgx.Identifier{owner}.Sanitize()); err != nil {
+			return fmt.Errorf("llm-gateway: ledger: migration identity cannot assume owner role")
+		}
+	}
+	// Runtime lookup puts pg_catalog first. DDL must target the configured
+	// application schema rather than attempting to create objects in pg_catalog.
+	var schemas []string
+	if err := tx.QueryRow(ctx, `SELECT current_schemas(false)`).Scan(&schemas); err != nil {
+		return fmt.Errorf("llm-gateway: ledger: migration schema lookup failed")
+	}
+	var schema string
+	for _, candidate := range schemas {
+		if candidate != "pg_catalog" && candidate != "information_schema" && !strings.HasPrefix(candidate, "pg_temp_") {
+			schema = candidate
+			break
+		}
+	}
+	if schema == "" {
+		return fmt.Errorf("llm-gateway: ledger: migration requires an existing application schema")
+	}
+	if _, err := tx.Exec(ctx, "SET LOCAL search_path = "+pgx.Identifier{schema}.Sanitize()+", pg_catalog"); err != nil {
+		return fmt.Errorf("llm-gateway: ledger: migration schema selection failed")
+	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, migrationLock); err != nil {
 		return fmt.Errorf("llm-gateway: ledger: migration lock: %w", err)
 	}

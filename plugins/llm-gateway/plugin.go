@@ -234,20 +234,11 @@ func openStore(ctx context.Context, cfg LedgerConfig, reg *platform.PluginRegist
 	if cfg.Store != "postgres" {
 		return newMemStore(cfg.History), nil
 	}
-	dsn := ""
-	if cfg.Postgres.DSNRef != "" {
-		d, err := reg.ResolveSecret(ctx, cfg.Postgres.DSNRef)
-		if err != nil {
-			return nil, fmt.Errorf("llm-gateway: ledger: %w", err)
-		}
-		dsn = d
-	} else {
-		dsn = os.Getenv(cfg.Postgres.DSNEnv)
-		if dsn == "" {
-			return nil, fmt.Errorf("llm-gateway: ledger: environment variable %s is empty", cfg.Postgres.DSNEnv)
-		}
+	dsn, err := cfg.Postgres.resolveDSN(ctx, reg.ResolveSecret)
+	if err != nil {
+		return nil, err
 	}
-	pg, err := openPGStore(ctx, dsn)
+	pg, err := openPGStoreMode(ctx, dsn, cfg.Postgres.schemaMode())
 	if err != nil {
 		return nil, err
 	}
