@@ -13,12 +13,21 @@ import (
 )
 
 func TestUsageExportPaginatesEqualTimestampsAndStripsDetails(t *testing.T) {
-	for _, backend := range []string{"memory", "sqlite"} {
+	for _, backend := range []string{"memory", "sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var store Store = newMemStore(2000)
 			if backend == "sqlite" {
 				var err error
 				store, err = openSQLiteStore(t.Context(), filepath.Join(managementTempDir(t), "export.db"))
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if backend == "postgres" {
+				dsn := pgDSN(t)
+				resetPG(t, dsn)
+				var err error
+				store, err = openPGStore(t.Context(), dsn)
 				if err != nil {
 					t.Fatal(err)
 				}

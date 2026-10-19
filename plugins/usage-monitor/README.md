@@ -197,6 +197,6 @@ Run the repository checks: `gofmt -l .`, `go vet ./...`, and
 restart persistence, idempotency, concurrent revisions, source binding,
 auth-mode bypass prevention, null-vs-zero semantics, credential rotation,
 failure retention, and gateway replay. Gateway export tests cover equal-time
-pagination and payload stripping against memory and SQLite stores.
+pagination and payload stripping against memory, SQLite, and PostgreSQL stores.
 The full Station suite needs loopback sockets and its optional PostgreSQL tests
 need an isolated test database, never the live ledger.
