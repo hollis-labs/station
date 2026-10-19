@@ -62,8 +62,9 @@ Claude/Codex subscription endpoints and agy's report are provider-specific
 contracts, not a universal billing API. Claude requires a usage-capable OAuth
 credential. API keys are not substituted for subscription sign-ins. Unsupported
 response shapes stay unknown/error, never a fabricated unused allowance.
-The parsers have synthetic contract fixtures; verify against the intended real
-accounts before relying on live figures.
+Claude, Codex, OpenCode Go, and agy allowance reads were verified against live
+accounts on 2026-10-19. Regression fixtures preserve the observed response
+shapes with synthetic values; verify account bindings for each deployment.
 
 Protocol references reviewed during implementation:
 [Claude OAuth usage](https://github.com/steipete/CodexBar/blob/main/docs/claude.md),

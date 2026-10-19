@@ -53,6 +53,34 @@ func TestProviderMeasurements(t *testing.T) {
 	}
 }
 
+// These field shapes were verified against live usage reports. Values are synthetic.
+func TestCurrentProviderReports(t *testing.T) {
+	now := time.Now().UTC()
+	reset := "2026-11-17T17:11:17Z"
+	for _, tc := range []struct {
+		kind, raw, id, model string
+		used                 float64
+	}{
+		{"opencode-go", `{"usage":{"monthly":{"percent":0,"resetsAt":"2026-11-17T17:11:17Z","status":"ok"}}}`, "monthly", "", 0},
+		{"agy", `{"status":"SUCCESS","command":{"name":"usage","data":{"groups":[{"name":"Gemini Models","buckets":[{"id":"gemini-weekly","remaining_fraction":0.75,"reset_time":"2026-11-17T17:11:17Z"}]}]}}}`, "g0:gemini-weekly", "Gemini Models", 25},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			windows, err := parseWindows(tc.kind, []byte(tc.raw), now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			o := Observation{ID: "live-shape", ObservedAt: now, Status: "ok", Windows: windows}
+			if err := o.validate(); err != nil {
+				t.Fatal(err)
+			}
+			w := windows[0]
+			if w.ID != tc.id || w.Model != tc.model || w.Used == nil || *w.Used != tc.used || w.Remaining == nil || *w.Remaining != 100-tc.used || w.ResetsAt == nil || w.ResetsAt.Format(time.RFC3339) != reset {
+				t.Fatalf("incorrect measurement: %+v", w)
+			}
+		})
+	}
+}
+
 func TestGatewayPagedProjectionAndRetry(t *testing.T) {
 	s, _ := testStore(t)
 	e := testEvent("first")

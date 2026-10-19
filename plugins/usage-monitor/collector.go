@@ -323,11 +323,12 @@ func parseWindows(kind string, raw []byte, at time.Time) ([]Window, error) {
 	case "opencode-go":
 		var d struct {
 			Usage map[string]struct {
-				Percent *float64   `json:"usagePercent"`
-				Used    *float64   `json:"used"`
-				Limit   *float64   `json:"limit"`
-				Reset   *time.Time `json:"resetsAt"`
-				ResetIn *int64     `json:"resetInSec"`
+				Percent        *float64   `json:"usagePercent"`
+				CurrentPercent *float64   `json:"percent"`
+				Used           *float64   `json:"used"`
+				Limit          *float64   `json:"limit"`
+				Reset          *time.Time `json:"resetsAt"`
+				ResetIn        *int64     `json:"resetInSec"`
 			} `json:"usage"`
 		}
 		if err := json.Unmarshal(raw, &d); err != nil {
@@ -339,6 +340,9 @@ func parseWindows(kind string, raw []byte, at time.Time) ([]Window, error) {
 				continue
 			}
 			used := w.Percent
+			if w.CurrentPercent != nil {
+				used = w.CurrentPercent
+			}
 			if used == nil && w.Used != nil && w.Limit != nil && *w.Limit > 0 {
 				used = number(*w.Used / *w.Limit * 100)
 			}
@@ -359,9 +363,11 @@ func parseWindows(kind string, raw []byte, at time.Time) ([]Window, error) {
 				Name string `json:"name"`
 				Data struct {
 					Groups []struct {
-						Name    string `json:"display_name"`
-						Buckets []struct {
+						Name        string `json:"display_name"`
+						CurrentName string `json:"name"`
+						Buckets     []struct {
 							ID        string     `json:"bucket_id"`
+							CurrentID string     `json:"id"`
 							Remaining *float64   `json:"remaining_fraction"`
 							Reset     *time.Time `json:"reset_time"`
 							Disabled  bool       `json:"disabled"`
@@ -377,9 +383,18 @@ func parseWindows(kind string, raw []byte, at time.Time) ([]Window, error) {
 			return nil, errors.New("unsuccessful usage report")
 		}
 		for gi, g := range d.Command.Data.Groups {
+			if g.CurrentName != "" {
+				g.Name = g.CurrentName
+			}
 			for _, b := range g.Buckets {
 				if b.Disabled {
 					continue
+				}
+				if b.CurrentID != "" {
+					b.ID = b.CurrentID
+				}
+				if b.ID == "" {
+					return nil, errors.New("missing bucket identity")
 				}
 				var used *float64
 				if b.Remaining != nil {
