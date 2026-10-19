@@ -173,6 +173,10 @@ func addPG(ctx context.Context, db pgBatcher, entries ...Entry) error {
 func where(q Query, extra string) (string, []any) {
 	var conds []string
 	var args []any
+	if q.Before != nil {
+		args = append(args, q.Before.At, q.Before.ID)
+		conds = append(conds, "(recorded_at,id)<($1,$2)")
+	}
 	if extra != "" {
 		conds = append(conds, extra)
 	}

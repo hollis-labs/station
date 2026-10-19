@@ -14,6 +14,7 @@ import (
 	sdksub "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/subprocess"
 
 	llmgateway "github.com/hollis-labs/station/plugins/llm-gateway"
+	usagemonitor "github.com/hollis-labs/station/plugins/usage-monitor"
 
 	"github.com/hollis-labs/station/platform"
 )
@@ -22,7 +23,7 @@ import (
 // block exists under `plugins:` in the API config, so listing one here grants
 // nothing by itself.
 func catalog() []platform.Plugin {
-	return []platform.Plugin{llmgateway.New()}
+	return []platform.Plugin{llmgateway.New(), usagemonitor.New()}
 }
 
 // loadAPIApp builds the HTTP API from an api.yaml path. An empty path returns
@@ -46,7 +47,7 @@ func loadAPIApp(ctx context.Context, path string, logging *platform.Logging, gat
 			return nil, err
 		}
 		logging.Logger.Info("gateway configuration loaded", "revision", revision)
-		plugins = []platform.Plugin{llmgateway.New().WithManagement(gatewayDB[0], revision)}
+		plugins = []platform.Plugin{llmgateway.New().WithManagement(gatewayDB[0], revision), usagemonitor.New()}
 	}
 	app, err := platform.Assemble(ctx, platform.Options{Config: cfg, Logger: logging.Logger, Sink: logging.Sink(), Plugins: plugins})
 	if err != nil {

@@ -2,6 +2,7 @@ package llmgateway
 
 import (
 	"context"
+	"sort"
 	"sync"
 )
 
@@ -40,6 +41,9 @@ func (m *memStore) Add(_ context.Context, entries ...Entry) error {
 }
 
 func matches(e Entry, q Query) bool {
+	if q.Before != nil && (e.Row.RecordedAt.After(q.Before.At) || e.Row.RecordedAt.Equal(q.Before.At) && e.ID >= q.Before.ID) {
+		return false
+	}
 	if q.ID != "" && e.ID != q.ID {
 		return false
 	}
@@ -58,6 +62,12 @@ func (m *memStore) Recent(_ context.Context, q Query) ([]Entry, error) {
 			out = append(out, e)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Row.RecordedAt.Equal(out[j].Row.RecordedAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].Row.RecordedAt.Before(out[j].Row.RecordedAt)
+	})
 	if q.Limit > 0 && len(out) > q.Limit {
 		out = out[len(out)-q.Limit:]
 	}

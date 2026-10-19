@@ -1,0 +1,46 @@
+# Copy to a private deployment directory and set database and credential paths.
+# Account definitions seed new accounts only; subsequent edits use the API.
+# Disabled accounts make this safe to validate before connecting credentials.
+listen: 127.0.0.1:18083
+auth:
+  mode: enforce
+  keys_file: /private/station/usage/clients.yaml
+plugins:
+  usage-monitor:
+    database: /private/station/usage/usage.db
+    poll_interval: 5m
+    stale_after: 15m
+    accounts:
+      - {id: claude-personal, provider: anthropic, kind: subscription, label: Claude, enabled: false}
+      - {id: codex-personal, provider: openai, kind: subscription, label: Codex, enabled: false}
+      - {id: agy-personal, provider: antigravity, kind: subscription, label: Antigravity, enabled: false}
+      - {id: go-workspace, provider: opencode-go, kind: subscription, label: OpenCode Go, enabled: false}
+      - {id: openai-api, provider: openai, kind: api, label: OpenAI API, enabled: false}
+    sources:
+      - id: claude-oauth
+        account_id: claude-personal
+        collector: claude
+        credential_ref: file:///private/claude/.credentials.json
+        credential_format: claude
+      - id: codex-oauth
+        account_id: codex-personal
+        collector: codex
+        credential_ref: file:///private/codex/auth.json
+        credential_format: codex
+      - id: agy-cli
+        account_id: agy-personal
+        collector: agy
+        executable: /private/bin/agy
+      - id: go-api
+        account_id: go-workspace
+        collector: opencode-go
+        credential_ref: keychain://station/opencode-go
+      - id: gateway-openai
+        account_id: openai-api
+        collector: gateway
+        gateway_url: https://llm.nanite.cloud/api/llm-gateway
+        credential_ref: file:///private/station/usage/gateway-reader.token
+      - id: laptop-claude
+        account_id: claude-personal
+        collector: push
+        principal: laptop-usage-reporter
