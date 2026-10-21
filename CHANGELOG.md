@@ -4,6 +4,10 @@ All notable user-facing changes land here.
 
 ## Unreleased
 
+### Security
+
+- Go toolchain 1.26.10 (`go` directive and CI pin) for GO-2026-6809 (crypto/x509); no behavior change.
+
 ### Changed
 
 - LLM gateway adopts `libs/llm/core v0.4.0` for bounded recurring catalog sync,
