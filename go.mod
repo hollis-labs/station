@@ -1,6 +1,6 @@
 module github.com/hollis-labs/station
 
-go 1.26.9
+go 1.26.10
 
 require (
 	github.com/hollis-labs/libs/app/app-host v0.1.0
