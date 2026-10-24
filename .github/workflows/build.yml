@@ -1,0 +1,14 @@
+name: build
+on:
+  push: { branches: [main] }
+  pull_request:
+  workflow_dispatch:
+permissions: { contents: read }
+jobs:
+  build:
+    uses: hollis-labs/tools/.github/workflows/go-app-build.yml@build/ci-artifact-20261024   # branch ref for the first test; pin to a sha after tools PR 9 merges
+    with:
+      app: station
+      main_pkg: ./cmd/station
+      binary: station
+      test_cmd: 'test -z "$(gofmt -l .)" && go mod tidy -diff && go build ./... && go vet ./... && go test -race -count=1 -timeout 4m ./...'
