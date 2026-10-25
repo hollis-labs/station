@@ -4,6 +4,10 @@ All notable user-facing changes land here.
 
 ## Unreleased
 
+## 0.1.0 - 2026-10-20
+
+First tagged release (the baseline tag; later changes are listed under the next version).
+
 ### Security
 
 - Go toolchain 1.26.10 (`go` directive and CI pin) for GO-2026-6809 (crypto/x509); no behavior change.

@@ -6,8 +6,8 @@ the generic dual-transport MCP plugin host library. Station itself is thin —
 flag parsing, its own config, and two starter virtual MCPs — proving the
 library is feature-complete enough to build a real product on top of.
 
-> **Pre-release.** Station is unreleased, not deployed, and has no outside
-> consumers. It's being built in the open: the code, the docs, and this
+> **Pre-release.** Station is pre-1.0 (tagged `0.x`), runs only in Hollis Labs' own
+> fleet, and has no outside consumers. It's being built in the open: the code, the docs, and this
 > README describe what exists today, not a pitch for what's planned.
 > Interfaces and behavior change without notice, and there are no
 > compatibility guarantees yet.
