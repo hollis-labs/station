@@ -1,0 +1,35 @@
+schema: fleet-deploy/v1
+app: station
+repo: hollis-labs/station
+artifact: {name: "station-{sha12}", tarball: "station_{version}_{os}_{arch}.tar.gz", sums: SHA256SUMS}
+targets:
+  - id: agent-os-station
+    when: {os: linux, arch: amd64}
+    hosts: [agent-os]
+    binary: station
+    install_root: ~/.local/share/fleet/releases/station
+    symlinks:
+      - path: ~/.local/libexec/station-gateway/station-llm-gateway
+      - path: ~/.local/libexec/station-gateway/station-usage-monitor
+    unit_dropins:
+      - unit: com.hollis-labs.cerberus.station.station-llm-gateway.service
+        name: 20-fleet-exec.conf
+        content: |
+          [Service]
+          ExecStart=
+          ExecStart="/home/chrispian/.local/libexec/station-gateway/station-llm-gateway" "serve" "-api-only" "-api-config" "/home/chrispian/.config/station/gateway/api.yaml" "-gateway-db" "/home/chrispian/.local/state/station/gateway/gateway.db"
+      - unit: com.hollis-labs.cerberus.station.station-usage-monitor.service
+        name: 20-fleet-exec.conf
+        content: |
+          [Service]
+          ExecStart=
+          ExecStart="/home/chrispian/.local/libexec/station-gateway/station-usage-monitor" "serve" "-api-only" "-api-config" "/home/chrispian/.config/station/usage/api.yaml"
+    preflight:
+      - {kind: sqlite_backup, db: ~/.local/state/station/usage/usage.db,     dest: "{backup_dir}/usage.pre-{version}.db"}
+      - {kind: sqlite_backup, db: ~/.local/state/station/gateway/gateway.db, dest: "{backup_dir}/gateway.pre-{version}.db"}   # backups must be 0600 (the binaries refuse non-private DB files; fine for backups, mandatory for any restore)
+    restart:                                           # ORDERED; usage-monitor first, the gateway has live clients
+      - {via: systemd-user, unit: com.hollis-labs.cerberus.station.station-usage-monitor.service}
+      - {via: systemd-user, unit: com.hollis-labs.cerberus.station.station-llm-gateway.service}
+    health:
+      - {url: "http://127.0.0.1:18083/healthz", expect_status: [200], timeout: 30s}
+      - {url: "http://127.0.0.1:18082/healthz", expect_status: [200], timeout: 30s}
