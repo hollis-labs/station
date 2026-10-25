@@ -2,8 +2,8 @@
 
 ## Supported versions
 
-Station is a pre-release prototype with no tagged release. Security fixes are
-made on `main`.
+Station is a pre-1.0 prototype (tagged `0.x`). Security fixes are made on
+`main` and released as a new patch version. There are no backports.
 
 ## Report a vulnerability
 
