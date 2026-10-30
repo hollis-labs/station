@@ -248,15 +248,47 @@ func strictDecoder(node yaml.Node) ConfigDecoder {
 	}
 }
 
+// AuthApp names the posture env var: HOLLIS_AUTH_STATION.
+const AuthApp = "station"
+
+// resolveAuthMode is auth.mode from api.yaml when set, else HOLLIS_AUTH_STATION,
+// else HOLLIS_AUTH, else enforce. A mode that came from the environment and is
+// not enforce is refused unless the API listener is loopback.
+func resolveAuthMode(cfg *Config) (auth.Mode, error) {
+	if cfg.Auth.Mode != "" {
+		mode, err := auth.ParseMode(cfg.Auth.Mode)
+		if err != nil {
+			return "", fmt.Errorf("platform: auth.mode: %w", err)
+		}
+		return mode, nil
+	}
+	mode, err := auth.ModeFromEnv(AuthApp, auth.ModeEnforce)
+	if err != nil {
+		return "", fmt.Errorf("platform: auth mode env: %w", err)
+	}
+	if mode != auth.ModeEnforce && cfg.Listen != "" && !isLoopbackListen(cfg.Listen) {
+		return "", fmt.Errorf("platform: auth mode %q (from environment) is only honoured on a loopback listener; %q is not loopback (use enforce)", mode, cfg.Listen)
+	}
+	return mode, nil
+}
+
+func isLoopbackListen(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // buildGuard builds the auth guard and its scope table from the mounted routes.
 func buildGuard(cfg *Config, reg *Registry, logger *slog.Logger) (*auth.Guard, *auth.JWTVerifier, error) {
-	modeStr := cfg.Auth.Mode
-	if modeStr == "" {
-		modeStr = string(auth.ModeEnforce)
-	}
-	mode, err := auth.ParseMode(modeStr)
+	mode, err := resolveAuthMode(cfg)
 	if err != nil {
-		return nil, nil, fmt.Errorf("platform: auth.mode: %w", err)
+		return nil, nil, err
 	}
 	configuredKeys := append([]KeyConfig(nil), cfg.Auth.Keys...)
 	if cfg.Auth.KeysFile != "" {
