@@ -4,6 +4,10 @@ All notable user-facing changes land here.
 
 ## Unreleased
 
+### Fixed
+
+- `station serve` now resolves `keychain://` references in a process-mode server's `env` from the same `secrets` store that `station secret set` and `station secret check` use, falling back to the older api-projection credential store for references provisioned there. Before, a key stored with `station secret set` passed `station secret check` but made `station serve` exit with "resolved to an empty value".
+
 ## 0.1.0 - 2026-10-20
 
 First tagged release (the baseline tag; later changes are listed under the next version).

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/libs/mcp/plugin-mcp/mcp-host/config"
+	"github.com/hollis-labs/libs/security/secrets"
 )
 
 type fakeResolver map[string]string
@@ -106,5 +107,37 @@ func TestResolve_SkipsInprocessAndDialLogicalServers(t *testing.T) {
 
 	if err := Resolve(context.Background(), cfg); err != nil {
 		t.Fatalf("Resolve should not touch inprocess or dial-mode servers: %v", err)
+	}
+}
+
+type fakeChainFallback map[string]string
+
+func (f fakeChainFallback) Resolve(ctx context.Context, ref string) (string, error) {
+	v, ok := f[ref]
+	if !ok {
+		return "", errors.New("no such reference")
+	}
+	return v, nil
+}
+
+func TestChain_FallsBackToLegacyAndErrorsWhenBothMiss(t *testing.T) {
+	// A keychain ref absent from the secrets store resolves from the legacy
+	// resolver; a ref absent from both is an error that does not leak values.
+	c := chain{primary: secrets.New(secrets.WithEnv()), fallback: fakeChainFallback{"env://STATION_TEST_ABSENT": "legacy-value"}}
+	got, err := c.Resolve(context.Background(), "env://STATION_TEST_ABSENT")
+	if err != nil || got != "legacy-value" {
+		t.Fatalf("fallback: got %q, %v", got, err)
+	}
+	if _, err := c.Resolve(context.Background(), "env://STATION_TEST_MISSING_BOTH"); err == nil {
+		t.Fatal("want an error when neither resolver has the ref")
+	}
+}
+
+func TestChain_PrefersSecretsStore(t *testing.T) {
+	t.Setenv("STATION_TEST_PRIMARY", "primary-value")
+	c := chain{primary: secrets.New(secrets.WithEnv()), fallback: fakeChainFallback{"env://STATION_TEST_PRIMARY": "legacy-value"}}
+	got, err := c.Resolve(context.Background(), "env://STATION_TEST_PRIMARY")
+	if err != nil || got != "primary-value" {
+		t.Fatalf("primary: got %q, %v", got, err)
 	}
 }

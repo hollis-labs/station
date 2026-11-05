@@ -12,7 +12,8 @@
 // entry on any process-mode logical server, using
 // api-projection/credential's resolver — the same keychain:// / helper://
 // scheme used elsewhere in the portfolio (Tether, Cerberus), under its own
-// "api-projection" keychain service.
+// "api-projection" keychain service, after the `secrets` store that
+// `station secret set|check` use (see chain below).
 //
 // A logical server whose env holds no references is left untouched. An
 // unresolvable reference is a fatal config error — mcp-host's own
@@ -25,6 +26,7 @@ import (
 
 	"github.com/hollis-labs/libs/mcp/plugin-mcp/api-projection/credential"
 	"github.com/hollis-labs/libs/mcp/plugin-mcp/mcp-host/config"
+	"github.com/hollis-labs/libs/security/secrets"
 )
 
 // resolver is the seam credential.Resolver satisfies — narrowed to what
@@ -34,8 +36,44 @@ type resolver interface {
 	Resolve(ctx context.Context, ref string) (string, error)
 }
 
+// chain resolves a reference from the `secrets` store first (the store that
+// `station secret set` writes and `station secret check` reads, so a key
+// provisioned with those commands is the one a spawned server receives) and
+// falls back to the api-projection credential resolver for references that
+// were provisioned there before (its own "api-projection" keychain service,
+// helper:// refs). A miss in both is an error; no error text carries a value.
+type chain struct {
+	primary  *secrets.Resolver
+	fallback resolver
+}
+
+func (c chain) Resolve(ctx context.Context, ref string) (string, error) {
+	res, err := c.primary.Resolve(ctx, ref)
+	if err == nil && !res.Secret.IsZero() {
+		return res.Secret.Reveal(), nil
+	}
+	value, fbErr := c.fallback.Resolve(ctx, ref)
+	if fbErr == nil {
+		return value, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("%w (legacy resolver: %v)", err, fbErr)
+	}
+	return "", fbErr
+}
+
 // newResolver is overridden in tests.
-var newResolver = func() resolver { return credential.NewResolver() }
+var newResolver = func() resolver {
+	return chain{
+		primary: secrets.New(secrets.WithLegacy("tether", func(ref secrets.Ref) string {
+			if ref.Authority == "" || len(ref.Path) == 0 {
+				return ""
+			}
+			return "provider-api-key:" + ref.Key()
+		})),
+		fallback: credential.NewResolver(),
+	}
+}
 
 // Resolve replaces every keychain:// / helper:// reference in cfg's
 // process-mode logical servers' env maps with its resolved value, in
