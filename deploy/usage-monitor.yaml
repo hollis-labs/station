@@ -9,19 +9,21 @@ targets:
     binary: usage-monitor
     install_root: ~/.local/share/fleet/releases/usage-monitor
     symlinks:
-      - path: ~/.local/libexec/station-gateway/station-usage-monitor
+      - path: ~/.local/libexec/station-gateway/usage-monitor
     unit_dropins:
       - unit: com.hollis-labs.cerberus.station.station-usage-monitor.service
-        name: 20-fleet-exec.conf
+        name: 30-usage-monitor-exec.conf
         content: |
           [Service]
           ExecStart=
-          ExecStart="%h/.local/libexec/station-gateway/station-usage-monitor" "serve"
+          ExecStart="%h/.local/libexec/station-gateway/usage-monitor" "serve"
           Environment=SUBSTRATE_CONFIG=%h/.config/station/usage/substrate.yaml
           Environment=USAGE_MONITOR_DATA_DIR=%h/.local/share/usage-monitor
           TimeoutStopSec=35
+    # The preflight backs up the NEW, migrated database (migrate-from runs before the first deploy). The old state directories are never touched.
+    # The links and the 30- drop-in are new paths and a later-sorting file: the old station links, the old 20-fleet-exec.conf drop-in and the old release are the rollback.
     preflight:
-      - {kind: sqlite_backup, db: ~/.local/state/station/usage/usage.db, dest: "{backup_dir}/usage.pre-{version}.db"}   # backups must be 0600
+      - {kind: sqlite_backup, db: ~/.local/share/usage-monitor/usage-monitor.db, dest: "{backup_dir}/usage.pre-{version}.db"}   # backups must be 0600
     restart:
       - {via: systemd-user, unit: com.hollis-labs.cerberus.station.station-usage-monitor.service}
     health:

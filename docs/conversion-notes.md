@@ -663,21 +663,21 @@ the cutover commit, not earlier. The new shape per unit, using the unit names th
 # gateway (artifact installs the llm-gateway binary; symlink name unchanged so the unit keeps its path)
 unit_dropins:
   - unit: com.hollis-labs.cerberus.station.station-llm-gateway.service
-    name: 20-fleet-exec.conf
+    name: 30-llm-gateway-exec.conf
     content: |
       [Service]
       ExecStart=
-      ExecStart="%h/.local/libexec/station-gateway/station-llm-gateway" "serve"
+      ExecStart="%h/.local/libexec/station-gateway/llm-gateway" "serve"
       Environment=SUBSTRATE_CONFIG=%h/.config/station/gateway/substrate.yaml
       Environment=LLM_GATEWAY_DATA_DIR=%h/.local/share/llm-gateway
       TimeoutStopSec=40
 # usage monitor
   - unit: com.hollis-labs.cerberus.station.station-usage-monitor.service
-    name: 20-fleet-exec.conf
+    name: 30-usage-monitor-exec.conf
     content: |
       [Service]
       ExecStart=
-      ExecStart="%h/.local/libexec/station-gateway/station-usage-monitor" "serve"
+      ExecStart="%h/.local/libexec/station-gateway/usage-monitor" "serve"
       Environment=SUBSTRATE_CONFIG=%h/.config/station/usage/substrate.yaml
       Environment=USAGE_MONITOR_DATA_DIR=%h/.local/share/usage-monitor
       TimeoutStopSec=35
@@ -729,3 +729,24 @@ alias already allowlisted for `deploy.yaml` (owner to confirm).
 `llm-gateway` and `usage-monitor` claim those same paths. What does the installer do when a new app first claims a path that is a link owned by
 another app, and what does `fleet-install rollback station` do afterwards? Not assumed. Fallback if the answer is bad: the new apps use new link
 paths (for example `.../station-gateway/llm-gateway`), the units' drop-ins point at them, and the old links stay as the rollback.
+
+## Descriptor settlement after the installer dry runs (driver, run 43274929798, 2026-11-12)
+
+Dry runs on the server host passed for all four targets (nothing changed). Three points settled:
+
+1. **Preflight backs up the new database.** `deploy/llm-gateway.yaml` and `deploy/usage-monitor.yaml` now back up
+   `~/.local/share/llm-gateway/llm-gateway.db` and `~/.local/share/usage-monitor/usage-monitor.db`, the files the new build opens after
+   `migrate-from`; the old `~/.local/state/station/{gateway,usage}` databases are never touched. Order at cutover: stop the old unit, take the online-backup
+   copy, run `migrate-from` with the new binary (from the downloaded artifact) into the data directory, then `fleet-install deploy` (its preflight
+   backs up the migrated file; its restart starts the new unit). A missing database makes `serve` refuse to start, so a deploy before the migration
+   fails loudly instead of creating an empty one.
+2. **No link takeover (the fallback).** The new apps use new links, `~/.local/libexec/station-gateway/llm-gateway` and `.../usage-monitor`, and a
+   drop-in that sorts after the old one (`30-llm-gateway-exec.conf`, `30-usage-monitor-exec.conf`; it clears and sets ExecStart, so it wins over the old
+   `20-fleet-exec.conf`). The old links, the old `20-` drop-ins and the old `station` release directory stay untouched and are the rollback for the gateway
+   and usage units: remove the `30-` drop-in, `systemctl --user daemon-reload`, restart. The old release directory must not be pruned while the
+   cutover is open (the `station` app keeps the last three versions in a directory the MCP-host targets now share, so no `station` deploy happens
+   before the gateway and usage cutovers are accepted). Removing the old links and drop-ins is a later cleanup after the owner accepts the cutover.
+3. **MCP-host rollback.** Both binaries are plain files today; the first deploy keeps each as `<name>.pre-fleet-install` (as Loom's real deploy did),
+   and that is the rollback point (relink or restore, restart).
+
+Runbook note: `fleet-install deploy station` needs `--target agent-os-avatar-station` or `--target agent-os-design-station` (two targets match the host).
