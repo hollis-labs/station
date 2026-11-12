@@ -294,7 +294,7 @@ type ProviderConfig struct {
 	// key itself never appears in configuration. Empty means no credential.
 	APIKeyEnv string `yaml:"api_key_env" json:"api_key_env"`
 	// APIKeyRef is a secret reference (keychain://openai/work, op://..., file://...)
-	// resolved at startup. Provision one with `station secret set <ref>`.
+	// resolved at startup. Provision one with `llm-gateway secret set <ref>`.
 	// Use this or api_key_env, not both.
 	APIKeyRef      string `yaml:"api_key_ref" json:"api_key_ref"`
 	TimeoutSeconds int    `yaml:"timeout_seconds" json:"timeout_seconds"`

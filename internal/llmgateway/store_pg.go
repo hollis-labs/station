@@ -106,10 +106,10 @@ func (s *pgStore) verifySchema(ctx context.Context) error {
 	defer tx.Rollback(ctx) //nolint:errcheck
 	var count, first, last int
 	if err = tx.QueryRow(ctx, `SELECT count(*),coalesce(min(version),0),coalesce(max(version),0) FROM llm_ledger_schema`).Scan(&count, &first, &last); err != nil {
-		return fmt.Errorf("llm-gateway: ledger: schema unavailable; run station ledger-migrate with the migration identity")
+		return fmt.Errorf("llm-gateway: ledger: schema unavailable; run llm-gateway ledger-migrate with the migration identity")
 	}
 	if count != len(pgMigrations) || first != 1 || last != len(pgMigrations) {
-		return fmt.Errorf("llm-gateway: ledger: schema does not match binary v%d; run station ledger-migrate with the matching binary and migration identity", len(pgMigrations))
+		return fmt.Errorf("llm-gateway: ledger: schema does not match binary v%d; run llm-gateway ledger-migrate with the matching binary and migration identity", len(pgMigrations))
 	}
 	// Resolve the full runtime row shape without reading any application rows.
 	rows, err := tx.Query(ctx, `SELECT id,recorded_at,request_id,principal,verified,operation,dialect,alias,provider,model,status,outcome,streamed,latency_ms,usage,price,cost_kind,cost_usd,cost_partial,detail,conversation_id,cost_bound FROM llm_calls LIMIT 0`)
