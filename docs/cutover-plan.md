@@ -24,6 +24,13 @@ tables. A `pg_dump -Fc` is taken in step zero as a safety copy, not because the 
 
 Read this first. Everything else is how it is done.
 
+**You type four passwords, one per unit.** Each unit is its own identity issuer, so each needs its own owner, created offline with
+`<unit> identity setup` at a terminal (usage-monitor, llm-gateway, avatar-station, design-station). The order that lets you do all four in
+one sitting: before the window, prepare everything else; then at the terminal run the four `identity setup` commands back to back (each
+prompts twice, nothing is echoed), then the key creation and installs follow in the window order of section 6 without you. A unit's
+owner can be created while its old unit still runs (it only creates the new data directory), so the four passwords can be typed before the
+first stop and the window itself needs no password. Use the same passphrase manager entry per unit; none is ever passed as an argument.
+
 **Station is three binaries now, and four things you could do before are gone, on purpose.**
 
 1. **Shared bearer tokens and client-key files.** The gateway's `clients.yaml`/`keys_file`, the usage monitor's keys file, the
@@ -267,7 +274,7 @@ every credential the gateway can resolve.
 | The owner, by hand | keys files, `station client`, SQLite import commands | `<unit> identity ...`, `llm-gateway gateway-store ...`, signed-in API | owner |
 | `station-operator` (gateway) | keys-file entry, `llm-gateway.*` | identity key, same scopes | operator, at cutover |
 | `station-smoke` (gateway) | keys-file entry | identity key, `chat`, `models.read`, `embed`, `decide` | operator |
-| The relay's clients (OpenAI and Anthropic SDKs, the JEV decision client) | keys-file entries; base URL `https://<public name>/api/llm-gateway` | **same URL**, a new key each with the scopes it uses; Anthropic clients may send `x-api-key` | driver and owner confirm the holders |
+| The relay's clients (OpenAI and Anthropic SDKs, the JEV decision client) | keys-file entries; base URL `https://<public name>/api/llm-gateway` | **same URL**, a new key each with the scopes it uses; Anthropic clients may send `x-api-key` | see the note below |
 | The usage monitor's eight `gateway` collectors | the operator's token, from one file | one `usage-collector` key (`llm-gateway.usage.read` only), written to that file | operator |
 | `usage-operator`, `usage-reader` | usage keys-file entries | identity keys on the usage unit | operator |
 | Usage push reporters (`principal`) | client names | one key each (`usage-monitor.ingest`), `principal: key:<id>` | each reporter's owner |
@@ -276,6 +283,14 @@ every credential the gateway can resolve.
 | Health probes | unauthenticated `/healthz` | unchanged | n/a |
 | Cerberus | the four registry entries | section 8 | whoever owns the registry |
 | Scripts | `scripts/gateway-smoke.py`, `gateway-management-smoke.py` | use the new keys; no `/clients` | operator |
+
+**Who the relay's clients are.** On the live host only two keys exist, so every relay call today comes from `station-operator` or
+`station-smoke`; each real client therefore holds one of those two, and after the cutover each gets its own key (the old key values stop
+working). No config on the primary host that names the gateway's address was found, so the holders cannot be listed from that host.
+Where else to look: the other hosts' configs and environment (anything that sets an OpenAI- or Anthropic-style base URL to the public
+name), the public name's reverse-proxy access log (source address and user agent per request, before the window), and the gateway's own
+ledger (`GET /v1/usage/export` by `principal` shows which of the two keys each call used, and when). Do the log pass before the window so
+every holder is known and none is cut off.
 
 The `/clients` routes had no caller found beyond the operator by hand; they are removed without a replacement route.
 
