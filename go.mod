@@ -11,7 +11,7 @@ require (
 	github.com/hollis-labs/libs/security/policy v0.1.0
 	github.com/hollis-labs/libs/security/redact v0.2.0
 	github.com/hollis-labs/libs/security/secrets v0.1.0
-	github.com/hollis-labs/substrate v0.1.1-0.20261112164520-da9f59bb59b7
+	github.com/hollis-labs/substrate v0.1.1-0.20261112224431-0f2899ed9fca
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/spf13/cobra v1.10.2
