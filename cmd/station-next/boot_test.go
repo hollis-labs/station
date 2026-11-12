@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hollis-labs/station/internal/appboot"
 	"io"
 	"net"
 	"net/http"
@@ -117,7 +118,7 @@ station:
 	t.Setenv("SUBSTRATE_CONFIG", file)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	run, err := boot.StartWith(ctx, substrateApp, substrateModules, substrateConfigJSON, boot.Options{AfterConfig: afterConfig(os.Getenv, true)})
+	run, err := boot.StartWith(ctx, substrateApp, substrateModules, substrateConfigJSON, appboot.Options(os.Getenv, substrateModules, appboot.ModeCreate))
 	if err != nil {
 		cancel()
 		t.Fatal(err)

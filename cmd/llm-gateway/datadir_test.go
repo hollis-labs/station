@@ -39,36 +39,54 @@ func TestDefaultDataDirIsNotLive(t *testing.T) {
 func TestPlan(t *testing.T) {
 	all := substrateModules
 	pick := func(want []string) []string { return appboot.Pick(all, want) }
+	ro := pick(appboot.ReadOnly)
 	for _, tc := range []struct {
 		args    []string
 		modules []string
-		prepare bool
+		mode    appboot.Mode
 	}{
-		{nil, all, true},
-		{[]string{"serve"}, all, true},
-		{[]string{"serve", "--help"}, pick(appboot.ReadOnly), false},
-		{[]string{"--help"}, pick(appboot.ReadOnly), false},
-		{[]string{"help"}, pick(appboot.ReadOnly), false},
-		{[]string{"completion", "bash"}, pick(appboot.ReadOnly), false},
-		{[]string{"identity", "setup", "--username", "owner"}, pick(appboot.WithIdentity), true},
-		{[]string{"identity", "key", "create", "--name", "n", "--scope", "s", "--stdout"}, pick(appboot.WithIdentity), true},
-		{[]string{"identity"}, pick(appboot.ReadOnly), false},
-		{[]string{"secret", "check", "file://a/b"}, pick(appboot.WithSecrets), false},
-		{[]string{"secret", "set", "file://a/b"}, pick(appboot.WithSecrets), true},
-		{[]string{"validate"}, pick(appboot.WithDatabaseSecrets), false},
-		{[]string{"ledger-migrate", "--owner-role", "o"}, pick(appboot.WithSecrets), false},
-		{[]string{"gateway-store", "stage", "--input", "d.json", "--expected", "0", "--actor", "a"}, pick(appboot.WithDatabase), true},
-		{[]string{"gateway-store", "activate", "--revision", "1", "--expected", "0", "--actor", "a"}, pick(appboot.WithDatabase), true},
-		{[]string{"gateway-store", "migrate-from", "--old-db", "/x/gateway.db"}, pick(appboot.WithDatabase), true},
-		{[]string{"gateway-store", "show", "--output", "o.json"}, pick(appboot.WithDatabase), false},
-		{[]string{"gateway-store", "status"}, pick(appboot.WithDatabase), false},
-		{[]string{"gateway-store", "history"}, pick(appboot.WithDatabase), false},
-		{[]string{"gateway-store"}, pick(appboot.ReadOnly), false},
-		{[]string{"nonsense"}, pick(appboot.ReadOnly), false},
+		{[]string{"serve"}, all, appboot.ModeServe},
+		{nil, ro, appboot.ModeRead},
+		{[]string{"--bogus"}, ro, appboot.ModeRead},
+		{[]string{"--help=true"}, ro, appboot.ModeRead},
+		{[]string{"serve", "--help"}, ro, appboot.ModeRead},
+		{[]string{"serve", "--port", "1"}, ro, appboot.ModeRead},
+		{[]string{"serve", "extra"}, ro, appboot.ModeRead},
+		{[]string{"--help"}, ro, appboot.ModeRead},
+		{[]string{"help"}, ro, appboot.ModeRead},
+		{[]string{"completion", "bash"}, ro, appboot.ModeRead},
+		{[]string{"identity", "setup", "--username", "owner"}, pick(appboot.WithIdentity), appboot.ModeCreate},
+		{[]string{"identity", "setup"}, ro, appboot.ModeRead},
+		{[]string{"identity", "setup", "--username"}, ro, appboot.ModeRead},
+		{[]string{"identity", "key", "create", "--name", "n", "--scope", "s", "--stdout"}, pick(appboot.WithIdentity), appboot.ModeCreate},
+		{[]string{"identity", "key", "create", "--name", "n", "--scope", "s"}, ro, appboot.ModeRead},
+		{[]string{"identity", "key", "create", "--name", "n", "--scope", "s", "--out", "/x", "--stdout"}, ro, appboot.ModeRead},
+		{[]string{"identity", "key", "create", "--scope", "s", "--stdout"}, ro, appboot.ModeRead},
+		{[]string{"identity"}, ro, appboot.ModeRead},
+		{[]string{"secret", "check", "file://a/b"}, pick(appboot.WithSecrets), appboot.ModeRead},
+		{[]string{"secret", "set", "file://a/b"}, pick(appboot.WithSecrets), appboot.ModeCreate},
+		{[]string{"secret", "set"}, ro, appboot.ModeRead},
+		{[]string{"nonsense"}, ro, appboot.ModeRead},
+		{[]string{"validate"}, pick(appboot.WithDatabaseSecrets), appboot.ModeRead},
+		{[]string{"validate", "extra"}, ro, appboot.ModeRead},
+		{[]string{"ledger-migrate", "--owner-role", "o"}, pick(appboot.WithSecrets), appboot.ModeRead},
+		{[]string{"ledger-migrate"}, ro, appboot.ModeRead},
+		{[]string{"gateway-store", "stage", "--input", "d.json", "--expected", "0", "--actor", "a"}, pick(appboot.WithDatabase), appboot.ModeCreate},
+		{[]string{"gateway-store", "stage", "--expected", "0", "--actor", "a"}, ro, appboot.ModeRead},
+		{[]string{"gateway-store", "stage", "--input", "d.json"}, ro, appboot.ModeRead},
+		{[]string{"gateway-store", "activate", "--revision", "1", "--expected", "0", "--actor", "a"}, pick(appboot.WithDatabase), appboot.ModeCreate},
+		{[]string{"gateway-store", "activate", "--revision", "1"}, ro, appboot.ModeRead},
+		{[]string{"gateway-store", "migrate-from", "--old-db", "/x/gateway.db"}, pick(appboot.WithDatabase), appboot.ModeCreate},
+		{[]string{"gateway-store", "migrate-from"}, ro, appboot.ModeRead},
+		{[]string{"gateway-store", "show", "--output", "o.json"}, pick(appboot.WithDatabase), appboot.ModeRead},
+		{[]string{"gateway-store", "status"}, pick(appboot.WithDatabase), appboot.ModeRead},
+		{[]string{"gateway-store", "status", "--bogus"}, ro, appboot.ModeRead},
+		{[]string{"gateway-store", "history"}, pick(appboot.WithDatabase), appboot.ModeRead},
+		{[]string{"gateway-store"}, ro, appboot.ModeRead},
 	} {
-		mods, prepare := plan(tc.args)
-		if !slices.Equal(mods, tc.modules) || prepare != tc.prepare {
-			t.Errorf("plan(%v) = %v, %v; want %v, %v", tc.args, mods, prepare, tc.modules, tc.prepare)
+		mods, mode := plan(tc.args)
+		if !slices.Equal(mods, tc.modules) || mode != tc.mode {
+			t.Errorf("plan(%q) = %v, %v; want %v, %v", tc.args, mods, mode, tc.modules, tc.mode)
 		}
 	}
 }
@@ -100,6 +118,18 @@ func TestReadOnlyCommandsCreateNothing(t *testing.T) {
 		wantErr string // "" means the command must succeed
 	}{
 		{[]string{"--help"}, ""},
+		{nil, ""},
+		{[]string{"--help=true"}, ""},
+		{[]string{"--bogus"}, "*"},
+		{[]string{"serve", "--port", "1"}, "*"},
+		{[]string{"serve", "extra"}, "*"},
+		{[]string{"serve", "--help=true"}, ""},
+		{[]string{"identity", "setup"}, "*"},
+		{[]string{"identity", "key", "create", "--name", "n"}, "*"},
+		{[]string{"secret", "set"}, "*"},
+		{[]string{"serve"}, "no database"},
+		{[]string{"gateway-store", "stage", "--expected", "0", "--actor", "a"}, "*"},
+		{[]string{"gateway-store", "migrate-from"}, "*"},
 		{[]string{"help"}, ""},
 		{[]string{"secret", "check", "file://ns/missing"}, "not_found"},
 		{[]string{"validate"}, "no database"},
@@ -112,7 +142,9 @@ func TestReadOnlyCommandsCreateNothing(t *testing.T) {
 		switch {
 		case tc.wantErr == "" && err != nil:
 			t.Errorf("%v failed: %v\n%s", tc.args, err, out)
-		case tc.wantErr != "" && (err == nil || !strings.Contains(strings.ToLower(out), tc.wantErr)):
+		case tc.wantErr == "*" && err == nil:
+			t.Errorf("%v succeeded, want a failure\n%s", tc.args, out)
+		case tc.wantErr != "" && tc.wantErr != "*" && (err == nil || !strings.Contains(strings.ToLower(out), tc.wantErr)):
 			t.Errorf("%v: err=%v output=%q, want a failure mentioning %q", tc.args, err, out, tc.wantErr)
 		}
 		if got := entries(home); len(got) != 0 {
@@ -133,8 +165,8 @@ func TestReadOnlyCommandsCreateNothing(t *testing.T) {
 func TestRootHasNoValueFlags(t *testing.T) {
 	t.Setenv("LLM_GATEWAY_DATA_DIR", filepath.Join(t.TempDir(), "data"))
 	t.Setenv("SUBSTRATE_CONFIG", "")
-	modules, prepare := plan([]string{"--help"})
-	run, err := boot.StartWith(context.Background(), substrateApp, modules, substrateConfigJSON, appboot.Options(os.Getenv, modules, prepare))
+	modules, mode := plan([]string{"--help"})
+	run, err := boot.StartWith(context.Background(), substrateApp, modules, substrateConfigJSON, appboot.Options(os.Getenv, modules, mode))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -151,3 +151,27 @@ func TestFirstRunScript(t *testing.T) {
 		t.Fatal("the second run changed the key files")
 	}
 }
+
+// `validate` checks the configuration against an existing database and writes nothing: after it
+// ran on a database that holds only the owner, with a bootstrap account configured, the migration
+// still works (it refuses a database whose accounts table has rows). On a directory with no
+// database it fails and leaves the directory as it was.
+func TestValidateWritesNothingAndLeavesRoomForTheMigration(t *testing.T) {
+	u := newUnit(t, "")
+	writeConfig(t, u, bootstrapAccounts)
+	if out, err := u.run("", "validate"); err == nil || !strings.Contains(out, "no database") {
+		t.Fatalf("validate with no database: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(u.dir); !os.IsNotExist(err) {
+		t.Fatalf("validate created the data directory: %v", err)
+	}
+	u.mustRun(ownerPassphrase+"\n", "identity", "setup", "--username", "owner")
+	if out, err := u.run("", "validate"); err != nil {
+		t.Fatalf("validate: %v\n%s", err, out)
+	}
+	old := filepath.Join(t.TempDir(), "old", "usage.db")
+	writeLegacy(t, old)
+	if out, err := u.run("", "migrate-from", "--old-db", old); err != nil {
+		t.Fatalf("migrate-from after validate: %v\n%s", err, out)
+	}
+}

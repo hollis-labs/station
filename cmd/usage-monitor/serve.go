@@ -56,7 +56,7 @@ func (m *monitor) serveCmd(ctx context.Context) *cobra.Command {
 
 // start validates the configuration, records the bootstrap accounts and builds the monitor. It
 // starts no collector.
-func (m *monitor) start(ctx context.Context) (*usagemonitor.Service, settings, error) {
+func (m *monitor) start(ctx context.Context, readOnly bool) (*usagemonitor.Service, settings, error) {
 	cfg, err := parseSettings(m.app.Config[settingsKey])
 	if err != nil {
 		return nil, cfg, err
@@ -65,17 +65,17 @@ func (m *monitor) start(ctx context.Context) (*usagemonitor.Service, settings, e
 	if st == nil || res == nil {
 		return nil, cfg, errNoModules
 	}
-	svc, err := usagemonitor.Start(ctx, secretHost{log: slog.Default(), res: res}, cfg.Config, usagemonitor.Options{Store: st})
+	svc, err := usagemonitor.Start(ctx, secretHost{log: slog.Default(), res: res}, cfg.Config, usagemonitor.Options{Store: st, ReadOnly: readOnly})
 	return svc, cfg, err
 }
 
 func (m *monitor) validateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "validate",
-		Short: "Check the configuration and open the existing database, without fetching accounts or launching agy",
+		Short: "Check the configuration against the existing database, writing nothing and fetching nothing",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			svc, _, err := m.start(c.Context())
+			svc, _, err := m.start(c.Context(), true)
 			if err != nil {
 				return err
 			}
@@ -98,7 +98,7 @@ func (m *monitor) serve(ctx context.Context) error {
 	if id == nil {
 		return errNoModules
 	}
-	svc, cfg, err := m.start(ctx)
+	svc, cfg, err := m.start(ctx, false)
 	if err != nil {
 		return err
 	}

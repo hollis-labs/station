@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"github.com/hollis-labs/station/internal/appboot"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,7 +19,7 @@ func bootOnly(t *testing.T) *station {
 	t.Setenv("STATION_DATA_DIR", filepath.Join(t.TempDir(), "data")) // never the live directory
 	t.Setenv("SUBSTRATE_CONFIG", "")
 	ctx, cancel := context.WithCancel(context.Background())
-	run, err := boot.StartWith(ctx, substrateApp, substrateModules, substrateConfigJSON, boot.Options{AfterConfig: afterConfig(os.Getenv, true)})
+	run, err := boot.StartWith(ctx, substrateApp, substrateModules, substrateConfigJSON, appboot.Options(os.Getenv, substrateModules, appboot.ModeCreate))
 	if err != nil {
 		cancel()
 		t.Fatal(err)

@@ -18,14 +18,14 @@ import (
 // Scopes the plugin's routes require. A caller key holding "llm-gateway.*"
 // holds all three.
 const (
-	ScopeChat         = "llm-gateway.chat"
-	ScopeEmbed        = "llm-gateway.embed"
-	ScopeDecide       = "llm-gateway.decide"
-	ScopeModelRead    = "llm-gateway.models.read"
-	ScopeUsageRead    = "llm-gateway.usage.read"
+	ScopeChat      = "llm-gateway.chat"
+	ScopeEmbed     = "llm-gateway.embed"
+	ScopeDecide    = "llm-gateway.decide"
+	ScopeModelRead = "llm-gateway.models.read"
+	ScopeUsageRead = "llm-gateway.usage.read"
 	// ScopeUsageDetail reads every caller's ledger entries with their Detail (with capture on, the
 	// request and response bodies). No collector holds it; usage.read alone sees only its own rows.
-	ScopeUsageDetail = "llm-gateway.usage.detail"
+	ScopeUsageDetail  = "llm-gateway.usage.detail"
 	ScopeCatalogWrite = "llm-gateway.catalog.write"
 )
 

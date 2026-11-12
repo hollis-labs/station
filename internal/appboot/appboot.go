@@ -17,18 +17,35 @@ import (
 	"github.com/hollis-labs/station/internal/appdirs"
 )
 
+// Mode is how much a command may touch.
+type Mode int
+
+const (
+	// ModeRead starts no module that writes: the data directory and the database must already
+	// exist, and the database is opened to verify its schema, never to migrate it.
+	ModeRead Mode = iota
+	// ModeServe is ModeRead plus schema migrations: serving needs a database that the offline
+	// bootstrap or the migration already created, so a mistyped data directory fails instead of
+	// becoming a new empty one.
+	ModeServe
+	// ModeCreate may create the data directory and the database: the offline bootstrap and the
+	// commands that copy or stage data into a new database.
+	ModeCreate
+)
+
 // AfterConfig is the boot hook that resolves run-time paths. It runs once, right after the config
 // module applied the SUBSTRATE_CONFIG override, so an operator's absolute path wins and a relative
 // default from the manifest is placed in the unit's data directory (<APP>_DATA_DIR, else the XDG
-// data home). With prepare it also creates that directory (0700); the read-only commands pass
-// false and create nothing (see Plan).
-func AfterConfig(getenv func(string) string, prepare bool) boot.Hook {
+// data home). Only ModeCreate creates that directory (0700). With a database module, every other
+// mode requires the database file to exist, and this check runs before any module starts, so a
+// wrong data directory is refused before the secrets or identity module can create anything in it.
+func AfterConfig(getenv func(string) string, mode Mode, withDatabase bool) boot.Hook {
 	return func(_ context.Context, app *module.App) error {
 		dirs, err := appdirs.Resolve(app.Name, getenv)
 		if err != nil {
 			return err
 		}
-		if prepare {
+		if mode == ModeCreate {
 			if err = dirs.Prepare(); err != nil {
 				return fmt.Errorf("prepare the data directory %s: %w", dirs.Data, err)
 			}
@@ -62,26 +79,30 @@ func AfterConfig(getenv func(string) string, prepare bool) boot.Hook {
 		set("database", "path", appdirs.DatabaseFile(app.Name), "sqlite")
 		set("identity", "key_file", appdirs.SigningKeyFile)
 		set("secrets", "state_dir", appdirs.SecretsDir)
+		if withDatabase && mode != ModeCreate {
+			path := DatabasePath(app)
+			if _, err := os.Stat(path); err != nil {
+				return fmt.Errorf("there is no database at %s: run the offline setup (identity setup) or the migration (migrate-from) first; this command does not create one", path)
+			}
+			if mode == ModeRead {
+				db, _ := app.Config["database"].(map[string]any)
+				db["schema_mode"] = "verify"
+			}
+		}
 		return nil
 	}
 }
 
 // Options is the boot configuration for one command: the path hook and, when the database module
-// starts, the guards that run just before it opens the file, in order. A command that opens the
-// database without being allowed to create it (prepare false) also gets a guard that refuses a
-// missing file (the database module would otherwise create an empty one).
-func Options(getenv func(string) string, modules []string, prepare bool, guards ...func(path string) error) boot.Options {
-	o := boot.Options{AfterConfig: AfterConfig(getenv, prepare)}
-	if !slices.Contains(modules, "database") {
+// starts, the guards that run just before it opens the file, in order.
+func Options(getenv func(string) string, modules []string, mode Mode, guards ...func(path string) error) boot.Options {
+	withDatabase := slices.Contains(modules, "database")
+	o := boot.Options{AfterConfig: AfterConfig(getenv, mode, withDatabase)}
+	if !withDatabase || len(guards) == 0 {
 		return o
 	}
 	o.Before = map[string]boot.Hook{"database": func(_ context.Context, app *module.App) error {
 		path := DatabasePath(app)
-		if !prepare {
-			if _, err := os.Stat(path); err != nil {
-				return fmt.Errorf("there is no database at %s: this command reads existing data and does not create it", path)
-			}
-		}
 		for _, g := range guards {
 			if err := g(path); err != nil {
 				return err
@@ -124,58 +145,134 @@ func Pick(all, want []string) []string {
 	return out
 }
 
-// Cmd is a command that starts only some modules: which, and whether it may create the data
-// directory and the database.
+// Cmd describes one command for Plan: the modules it starts, how much it may touch, and the
+// command line it accepts. A line that does not fit the description cannot run (cobra would
+// reject it), so Plan starts only the read-only set for it, before anything is created.
 type Cmd struct {
 	Modules []string
-	Create  bool
+	Mode    Mode
+	// Flags take a value; Bools do not. Together they are every flag the command accepts.
+	Flags, Bools []string
+	// Required flags must be present with a value. ExactlyOne names flags of which exactly one
+	// must be present.
+	Required, ExactlyOne []string
+	// Args is the exact number of positional arguments.
+	Args int
 }
 
-// Plan decides, from the command line, which framework modules to start and whether the data
-// directory may be created. all is the binary's start order. Only serving (the commands in full,
-// or no command), `secret set`, `identity setup`, `identity key create` and the commands in cmds
-// that say so write anything. Every other command, including validate, list, secret check and
-// help, reads configuration and starts no module that opens a file, so running one without
-// <APP>_DATA_DIR cannot touch the live directory of the app name.
+// fits reports whether rest (the words after the command) is a line cobra would accept.
+func (c Cmd) fits(rest []string) bool {
+	seen := map[string]string{}
+	positional := 0
+	for i := 0; i < len(rest); i++ {
+		a := rest[i]
+		switch {
+		case a == "--":
+			positional += len(rest) - i - 1
+			i = len(rest)
+		case strings.HasPrefix(a, "--"):
+			name, val, hasVal := strings.Cut(a[2:], "=")
+			switch {
+			case slices.Contains(c.Bools, name):
+				if !hasVal {
+					val = "true"
+				}
+			case slices.Contains(c.Flags, name):
+				if !hasVal {
+					if i+1 >= len(rest) {
+						return false
+					}
+					i++
+					val = rest[i]
+				}
+			default:
+				return false
+			}
+			seen[name] = val
+		case strings.HasPrefix(a, "-") && a != "-":
+			return false
+		default:
+			positional++
+		}
+	}
+	if positional != c.Args {
+		return false
+	}
+	for _, r := range c.Required {
+		if seen[r] == "" {
+			return false
+		}
+	}
+	if len(c.ExactlyOne) > 0 {
+		n := 0
+		for _, f := range c.ExactlyOne {
+			if v, ok := seen[f]; ok && v != "" && v != "false" {
+				n++
+			}
+		}
+		if n != 1 {
+			return false
+		}
+	}
+	return true
+}
+
+// builtin are the commands every Station binary has. Serving is exactly `serve`.
+func builtin(all []string) map[string]Cmd {
+	return map[string]Cmd{
+		"serve":        {Modules: all, Mode: ModeServe},
+		"secret set":   {Modules: Pick(all, WithSecrets), Mode: ModeCreate, Args: 1},
+		"secret check": {Modules: Pick(all, WithSecrets), Mode: ModeRead, Args: 1},
+		"identity setup": {Modules: Pick(all, WithIdentity), Mode: ModeCreate,
+			Flags: []string{"username", "display-name"}, Required: []string{"username"}},
+		"identity key create": {Modules: Pick(all, WithIdentity), Mode: ModeCreate,
+			Flags: []string{"name", "scope", "audience", "ttl", "out"}, Bools: []string{"stdout"},
+			Required: []string{"name", "scope"}, ExactlyOne: []string{"out", "stdout"}},
+	}
+}
+
+// Plan decides, from the command line, which framework modules to start and how much the command
+// may touch. all is the binary's start order and cmds its own commands, keyed by the command words
+// ("gateway-store show").
 //
-// cmds is keyed by the command words ("gateway-store show").
+// Only a line that is exactly a known command, with every flag it needs and none it does not
+// know, gets that command's modules. Everything else (no command, a bare flag, an unknown word,
+// an extra argument, a missing required flag, help) starts the read-only set and creates
+// nothing, so running it without <APP>_DATA_DIR cannot touch the live directory of the app name.
+// Full start is exactly `serve`, with no further argument.
 //
-// Every argument that does not start with "-" counts as a command word. That is right only while
-// the root command has no global flag that takes a value (today its one flag is -h/--help):
-// `--level debug serve` would read "debug" as the command. Each binary has a test that fails when
-// such a flag is added, and then Plan must learn it.
-func Plan(args, all, full []string, cmds map[string]Cmd) (modules []string, prepare bool) {
-	var words []string
+// The command is read from the first words, so the root command must have no flag before it that
+// takes a value (today its one flag is -h/--help); each binary has a test that fails when such a
+// flag is added, and then Plan must learn it.
+func Plan(args, all []string, cmds map[string]Cmd) (modules []string, mode Mode) {
+	readOnly := Pick(all, ReadOnly)
+	var words int
+	for words < len(args) && !strings.HasPrefix(args[words], "-") {
+		words++
+	}
 	for _, a := range args {
 		if a == "-h" || a == "--help" || a == "--version" {
-			return Pick(all, ReadOnly), false
-		}
-		if !strings.HasPrefix(a, "-") {
-			words = append(words, a)
+			return readOnly, ModeRead
 		}
 	}
-	at := func(n int) string {
-		if n < len(words) {
-			return words[n]
-		}
-		return ""
+	table := builtin(all)
+	for k, v := range cmds {
+		table[k] = v
 	}
-	switch {
-	case len(words) == 0 || slices.Contains(full, words[0]):
-		return all, true
-	case words[0] == "secret" && at(1) == "set":
-		return Pick(all, WithSecrets), true
-	case words[0] == "identity" && (at(1) == "setup" || (at(1) == "key" && at(2) == "create")):
-		// Offline bootstrap: creates the database, the signing key and the owner or a key.
-		return Pick(all, WithIdentity), true
-	case words[0] == "secret" && at(1) == "check":
-		return Pick(all, WithSecrets), false
-	}
-	for name, c := range cmds {
+	// The longest command whose words are the line's leading words.
+	best, bestN := "", 0
+	for name := range table {
 		fields := strings.Fields(name)
-		if len(words) >= len(fields) && slices.Equal(words[:len(fields)], fields) {
-			return Pick(all, c.Modules), c.Create
+		if len(fields) <= words && len(fields) > bestN && slices.Equal(args[:len(fields)], fields) {
+			best, bestN = name, len(fields)
 		}
 	}
-	return Pick(all, ReadOnly), false
+	if bestN == 0 {
+		return readOnly, ModeRead
+	}
+	c := table[best]
+	if !c.fits(args[bestN:]) {
+		return readOnly, ModeRead
+	}
+	return Pick(all, c.Modules), c.Mode
 }

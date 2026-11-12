@@ -16,6 +16,8 @@ import (
 
 	"github.com/hollis-labs/substrate/modules/cli"
 
+	"github.com/hollis-labs/station/internal/appboot"
+
 	"github.com/hollis-labs/station/internal/appcmd"
 )
 
@@ -30,8 +32,8 @@ func main() {
 }
 
 func run(ctx context.Context, getenv func(string) string, args []string) error {
-	modules, prepare := plan(args)
-	started, err := boot.StartWith(ctx, substrateApp, modules, substrateConfigJSON, boot.Options{AfterConfig: afterConfig(getenv, prepare)})
+	modules, mode := plan(args)
+	started, err := boot.StartWith(ctx, substrateApp, modules, substrateConfigJSON, appboot.Options(getenv, modules, mode))
 	if err != nil {
 		return err
 	}
@@ -42,14 +44,10 @@ func run(ctx context.Context, getenv func(string) string, args []string) error {
 	return rootCmd.ExecuteContext(ctx)
 }
 
-// root is the command tree: the framework's skeleton plus Station's commands. `station` with no
-// command serves, like `station serve`.
+// root is the command tree: the framework's skeleton plus Station's commands. `station`
 func (s *station) root(ctx context.Context, args []string) *cobra.Command {
 	rootCmd := cli.Root(s.app)
 	rootCmd.SetArgs(args) // the same words plan() looked at
-	serve := s.serveCmd(ctx)
-	rootCmd.RunE = func(c *cobra.Command, args []string) error { return serve.RunE(c, args) }
-	rootCmd.Args = cobra.NoArgs
-	rootCmd.AddCommand(serve, s.listCmd(), s.validateCmd(), appcmd.Secret(s.app))
+	rootCmd.AddCommand(s.serveCmd(ctx), s.listCmd(), s.validateCmd(), appcmd.Secret(s.app))
 	return rootCmd
 }

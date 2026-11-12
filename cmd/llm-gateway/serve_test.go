@@ -68,7 +68,7 @@ func TestServeRefusesNonLoopbackBind(t *testing.T) {
 			t.Setenv("SUBSTRATE_CONFIG", u.cfg)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			run, err := boot.StartWith(ctx, substrateApp, substrateModules, substrateConfigJSON, appboot.Options(os.Getenv, substrateModules, true))
+			run, err := boot.StartWith(ctx, substrateApp, substrateModules, substrateConfigJSON, appboot.Options(os.Getenv, substrateModules, appboot.ModeCreate))
 			if err != nil {
 				t.Fatal(err)
 			}

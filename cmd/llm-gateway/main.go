@@ -34,8 +34,8 @@ func main() {
 }
 
 func run(ctx context.Context, getenv func(string) string, args []string) error {
-	modules, prepare := plan(args)
-	opts := appboot.Options(getenv, modules, prepare, llmgateway.RefuseLegacyDatabase)
+	modules, mode := plan(args)
+	opts := appboot.Options(getenv, modules, mode, llmgateway.RefuseLegacyDatabase)
 	started, err := boot.StartWith(ctx, substrateApp, modules, substrateConfigJSON, opts)
 	if err != nil {
 		return err
@@ -46,14 +46,10 @@ func run(ctx context.Context, getenv func(string) string, args []string) error {
 	return g.root(ctx, args).ExecuteContext(ctx)
 }
 
-// root is the command tree: the framework's skeleton plus the gateway's commands. `llm-gateway`
-// with no command serves, like `llm-gateway serve`.
+// root is the command tree: the framework's skeleton plus the gateway's commands. Only `serve` serves; a bare command prints help.
 func (g *gateway) root(ctx context.Context, args []string) *cobra.Command {
 	rootCmd := cli.Root(g.app)
 	rootCmd.SetArgs(args) // the same words plan() looked at
-	serve := g.serveCmd(ctx)
-	rootCmd.RunE = func(c *cobra.Command, args []string) error { return serve.RunE(c, args) }
-	rootCmd.Args = cobra.NoArgs
-	rootCmd.AddCommand(serve, g.validateCmd(), g.storeCmd(), g.ledgerMigrateCmd(), appcmd.Secret(g.app))
+	rootCmd.AddCommand(g.serveCmd(ctx), g.validateCmd(), g.storeCmd(), g.ledgerMigrateCmd(), appcmd.Secret(g.app))
 	return rootCmd
 }

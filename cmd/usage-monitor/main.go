@@ -34,8 +34,8 @@ func main() {
 }
 
 func run(ctx context.Context, getenv func(string) string, args []string) error {
-	modules, prepare := plan(args)
-	opts := appboot.Options(getenv, modules, prepare, usagemonitor.RefuseLegacyDatabase)
+	modules, mode := plan(args)
+	opts := appboot.Options(getenv, modules, mode, usagemonitor.RefuseLegacyDatabase)
 	started, err := boot.StartWith(ctx, substrateApp, modules, substrateConfigJSON, opts)
 	if err != nil {
 		return err
@@ -46,14 +46,10 @@ func run(ctx context.Context, getenv func(string) string, args []string) error {
 	return m.root(ctx, args).ExecuteContext(ctx)
 }
 
-// root is the command tree: the framework's skeleton plus the monitor's commands. `usage-monitor`
-// with no command serves, like `usage-monitor serve`.
+// root is the command tree: the framework's skeleton plus the monitor's commands. Only `serve` serves; a bare command prints help.
 func (m *monitor) root(ctx context.Context, args []string) *cobra.Command {
 	rootCmd := cli.Root(m.app)
 	rootCmd.SetArgs(args) // the same words plan() looked at
-	serve := m.serveCmd(ctx)
-	rootCmd.RunE = func(c *cobra.Command, args []string) error { return serve.RunE(c, args) }
-	rootCmd.Args = cobra.NoArgs
-	rootCmd.AddCommand(serve, m.validateCmd(), m.migrateCmd(), appcmd.Secret(m.app))
+	rootCmd.AddCommand(m.serveCmd(ctx), m.validateCmd(), m.migrateCmd(), appcmd.Secret(m.app))
 	return rootCmd
 }

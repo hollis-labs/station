@@ -74,6 +74,10 @@ type Options struct {
 	Store *store.Store
 	// Transport is the HTTP transport of the collectors; nil uses the default.
 	Transport http.RoundTripper
+	// ReadOnly validates the configuration against the database and writes nothing: the
+	// bootstrap accounts are not recorded (a source may name one that is not stored yet). `validate`
+	// uses it, so checking a configuration cannot fill an empty database and block `migrate-from`.
+	ReadOnly bool
 }
 
 // Service is the running monitor: the routes to serve and the collectors to run.
@@ -126,6 +130,9 @@ func Start(ctx context.Context, host Host, cfg Config, o Options) (*Service, err
 	for _, a := range cfg.Accounts {
 		old, e := store.Account(ctx, a.ID)
 		if errors.Is(e, ErrNotFound) {
+			if o.ReadOnly {
+				continue
+			}
 			if _, err = store.PutAccount(ctx, a, 0, "bootstrap"); err != nil {
 				return nil, err
 			}
@@ -138,6 +145,12 @@ func Start(ctx context.Context, host Host, cfg Config, o Options) (*Service, err
 	api := &api{store: store, sources: sources, collectors: map[string]*collector{}, stale: stale}
 	for _, s := range cfg.Sources {
 		a, e := store.Account(ctx, s.AccountID)
+		if errors.Is(e, ErrNotFound) && o.ReadOnly {
+			a, e = accounts[s.AccountID], nil
+			if a.ID == "" {
+				e = ErrNotFound
+			}
+		}
 		if e != nil {
 			return nil, fmt.Errorf("source %s account: %w", s.ID, e)
 		}

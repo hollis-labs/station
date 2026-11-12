@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/hollis-labs/station/internal/appboot"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -34,40 +35,44 @@ func TestDefaultDataDirIsNotLive(t *testing.T) {
 }
 
 func TestPlan(t *testing.T) {
+	all := substrateModules
+	pick := func(want []string) []string { return appboot.Pick(all, want) }
+	ro := pick(appboot.ReadOnly)
 	for _, tc := range []struct {
 		args    []string
 		modules []string
-		prepare bool
+		mode    appboot.Mode
 	}{
-		{nil, substrateModules, true},
-		{[]string{"serve"}, substrateModules, true},
-		{[]string{"serve", "--help"}, readOnly, false},
-		{[]string{"validate"}, readOnly, false},
-		{[]string{"list"}, readOnly, false},
-		{[]string{"--help"}, readOnly, false},
-		{[]string{"help"}, readOnly, false},
-		{[]string{"completion", "bash"}, readOnly, false},
-		{[]string{"identity", "setup", "--username", "owner"}, withIdentity, true},
-		{[]string{"identity", "key", "create", "--name", "n", "--scope", "s", "--stdout"}, withIdentity, true},
-		{[]string{"identity"}, readOnly, false},
-		{[]string{"identity", "key"}, readOnly, false},
-		{[]string{"secret", "check", "file://a/b"}, withSecrets, false},
-		{[]string{"secret", "set", "file://a/b"}, withSecrets, true},
-		{[]string{"nonsense"}, readOnly, false},
+		{[]string{"serve"}, all, appboot.ModeServe},
+		{nil, ro, appboot.ModeRead},
+		{[]string{"--bogus"}, ro, appboot.ModeRead},
+		{[]string{"--help=true"}, ro, appboot.ModeRead},
+		{[]string{"serve", "--help"}, ro, appboot.ModeRead},
+		{[]string{"serve", "--port", "1"}, ro, appboot.ModeRead},
+		{[]string{"serve", "extra"}, ro, appboot.ModeRead},
+		{[]string{"--help"}, ro, appboot.ModeRead},
+		{[]string{"help"}, ro, appboot.ModeRead},
+		{[]string{"completion", "bash"}, ro, appboot.ModeRead},
+		{[]string{"identity", "setup", "--username", "owner"}, pick(appboot.WithIdentity), appboot.ModeCreate},
+		{[]string{"identity", "setup"}, ro, appboot.ModeRead},
+		{[]string{"identity", "setup", "--username"}, ro, appboot.ModeRead},
+		{[]string{"identity", "key", "create", "--name", "n", "--scope", "s", "--stdout"}, pick(appboot.WithIdentity), appboot.ModeCreate},
+		{[]string{"identity", "key", "create", "--name", "n", "--scope", "s"}, ro, appboot.ModeRead},
+		{[]string{"identity", "key", "create", "--name", "n", "--scope", "s", "--out", "/x", "--stdout"}, ro, appboot.ModeRead},
+		{[]string{"identity", "key", "create", "--scope", "s", "--stdout"}, ro, appboot.ModeRead},
+		{[]string{"identity"}, ro, appboot.ModeRead},
+		{[]string{"secret", "check", "file://a/b"}, pick(appboot.WithSecrets), appboot.ModeRead},
+		{[]string{"secret", "set", "file://a/b"}, pick(appboot.WithSecrets), appboot.ModeCreate},
+		{[]string{"secret", "set"}, ro, appboot.ModeRead},
+		{[]string{"nonsense"}, ro, appboot.ModeRead},
+		{[]string{"validate"}, ro, appboot.ModeRead},
+		{[]string{"list"}, ro, appboot.ModeRead},
 	} {
-		mods, prepare := plan(tc.args)
-		if !slices.Equal(mods, pickOrAll(tc.modules)) || prepare != tc.prepare {
-			t.Errorf("plan(%v) = %v, %v; want %v, %v", tc.args, mods, prepare, tc.modules, tc.prepare)
+		mods, mode := plan(tc.args)
+		if !slices.Equal(mods, tc.modules) || mode != tc.mode {
+			t.Errorf("plan(%q) = %v, %v; want %v, %v", tc.args, mods, mode, tc.modules, tc.mode)
 		}
 	}
-}
-
-// pickOrAll orders a module set the way plan does.
-func pickOrAll(want []string) []string {
-	if slices.Equal(want, substrateModules) {
-		return want
-	}
-	return pick(want)
 }
 
 // Read-only commands start no module that opens a file and create no directory: with an empty
@@ -115,7 +120,36 @@ func TestReadOnlyCommandsCreateNothing(t *testing.T) {
 			t.Errorf("%v created %v", args, got)
 		}
 	}
+	// Lines cobra rejects must be rejected before anything is created: a bare `station` prints
+	// help, and a bad flag, an extra argument or a missing required flag starts nothing.
+	for _, args := range [][]string{{"--bogus"}, {"serve", "--port", "1"}, {"serve", "extra"}, {"identity", "setup"},
+		{"identity", "key", "create", "--name", "n"}, {"secret", "set"}} {
+		home := t.TempDir()
+		if out, err := run(home, "", args...); err == nil {
+			t.Errorf("%v succeeded, want a failure\n%s", args, out)
+		}
+		if got := entries(home); len(got) != 0 {
+			t.Errorf("%v created %v", args, got)
+		}
+	}
+	for _, args := range [][]string{nil, {"serve", "--help=true"}} {
+		home := t.TempDir()
+		if out, err := run(home, "", args...); err != nil {
+			t.Errorf("%v failed: %v\n%s", args, err, out)
+		}
+		if got := entries(home); len(got) != 0 {
+			t.Errorf("%v created %v", args, got)
+		}
+	}
+	// serve on a data directory with no database is refused and creates nothing.
 	home := t.TempDir()
+	if out, err := run(home, "", "serve"); err == nil || !strings.Contains(out, "no database") {
+		t.Errorf("serve with no database: err=%v\n%s", err, out)
+	}
+	if got := entries(home); len(got) != 0 {
+		t.Errorf("serve created %v", got)
+	}
+	home = t.TempDir()
 	if out, err := run(home, "value\n", "secret", "set", "file://ns/key"); err != nil {
 		t.Fatalf("control: secret set failed: %v\n%s", err, out)
 	}
@@ -129,8 +163,8 @@ func TestReadOnlyCommandsCreateNothing(t *testing.T) {
 func TestRootHasNoValueFlags(t *testing.T) {
 	t.Setenv("STATION_DATA_DIR", filepath.Join(t.TempDir(), "data"))
 	t.Setenv("SUBSTRATE_CONFIG", "")
-	modules, prepare := plan([]string{"validate"})
-	run, err := boot.StartWith(context.Background(), substrateApp, modules, substrateConfigJSON, boot.Options{AfterConfig: afterConfig(os.Getenv, prepare)})
+	modules, mode := plan([]string{"validate"})
+	run, err := boot.StartWith(context.Background(), substrateApp, modules, substrateConfigJSON, appboot.Options(os.Getenv, modules, mode))
 	if err != nil {
 		t.Fatal(err)
 	}
