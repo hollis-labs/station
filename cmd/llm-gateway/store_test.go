@@ -137,3 +137,32 @@ func TestServiceRefusesOldGatewayDatabase(t *testing.T) {
 		}
 	}
 }
+
+// `gateway-store show` writes a file meant to be edited and staged again. Literal provider header
+// values are not written to it, and staging the edited file keeps the stored values.
+func TestGatewayStoreShowRedactsHeaderValuesAndStageRestoresThem(t *testing.T) {
+	const headerValue = "tenant-value-that-must-not-leave"
+	u := newUnit(t, "")
+	withHeader := strings.Replace(gatewayDoc(t), `"api_key_env":"LLMGW_TEST_KEY"`, `"api_key_env":"LLMGW_TEST_KEY","headers":{"X-Tenant":"`+headerValue+`"}`, 1)
+	u.mustRun("", "gateway-store", "stage", "--input", writeFile(t, "doc.json", withHeader), "--expected", "0", "--actor", "test")
+	u.mustRun("", "gateway-store", "activate", "--revision", "1", "--expected", "0", "--actor", "test")
+	out := filepath.Join(t.TempDir(), "shown.json")
+	u.mustRun("", "gateway-store", "show", "--output", out)
+	b, err := os.ReadFile(out)
+	if err != nil || strings.Contains(string(b), headerValue) || !strings.Contains(string(b), "X-Tenant") || !strings.Contains(string(b), "[redacted]") {
+		t.Fatalf("show wrote %q (%v)", b, err)
+	}
+	u.mustRun("", "gateway-store", "stage", "--input", out, "--expected", "1", "--actor", "test")
+	// Revision 2 is the edited file staged back unchanged; its checksum equals revision 1's only if
+	// every placeholder was restored to the stored value.
+	var hist []struct {
+		ID     int64  `json:"id"`
+		SHA256 string `json:"sha256"`
+	}
+	if err := json.Unmarshal([]byte(u.mustRunStdout("", "gateway-store", "history")), &hist); err != nil || len(hist) != 2 {
+		t.Fatalf("history: %+v %v", hist, err)
+	}
+	if hist[0].SHA256 == "" || hist[0].SHA256 != hist[1].SHA256 {
+		t.Fatalf("the staged copy differs from the stored revision, so a placeholder was stored: %+v", hist)
+	}
+}

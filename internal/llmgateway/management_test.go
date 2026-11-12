@@ -395,3 +395,49 @@ func TestManagementEmptyCollectionsRoundTrip(t *testing.T) {
 		requireManagementStatus(t, e.request("PUT", "/"+resource, "editor-key", w.Header().Get("ETag"), update), 201)
 	}
 }
+
+// Literal provider headers are credentials by another name. The management GET shows their names
+// and never their values, and reading then writing the resource back keeps the stored value.
+func TestManagementNeverReturnsProviderHeaderValues(t *testing.T) {
+	const headerValue = "header-value-not-for-readers"
+	e := newManagementTestEnv(t)
+	rev, err := e.store.Revision(t.Context(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev.Document.Gateway.Providers[0].Headers = map[string]string{"X-Tenant": headerValue}
+	saved, err := e.store.Save(t.Context(), *rev.Document, 1, "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/config", "/providers", "/config?revision=2"} {
+		w := e.request("GET", path, "reader-key", "", nil)
+		requireManagementStatus(t, w, 200)
+		if strings.Contains(w.Body.String(), headerValue) {
+			t.Fatalf("GET %s returned a header value: %s", path, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "X-Tenant") || !strings.Contains(w.Body.String(), RedactedHeader) {
+			t.Fatalf("GET %s lost the header name or the placeholder: %s", path, w.Body.String())
+		}
+	}
+	// Read the providers, write them back unchanged: the stored value is restored.
+	w := e.request("GET", "/providers", "editor-key", "", nil)
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	requireManagementStatus(t, e.request("PUT", "/providers", "editor-key", w.Header().Get("ETag"), map[string]json.RawMessage{"providers": body["providers"]}), 201)
+	after, err := e.store.Revision(t.Context(), saved.ID+1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := after.Document.Gateway.Providers[0].Headers["X-Tenant"]; got != headerValue {
+		t.Fatalf("the round trip stored %q, want the original value", got)
+	}
+	// A placeholder with nothing to restore is refused instead of stored.
+	doc := managementFixture()
+	doc.Gateway.Providers[0].Headers = map[string]string{"X-New": RedactedHeader}
+	if _, err := e.store.Save(t.Context(), doc, 0, "operator"); err == nil || !strings.Contains(err.Error(), "placeholder") {
+		t.Fatalf("a placeholder with no base was saved: %v", err)
+	}
+}

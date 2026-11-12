@@ -125,7 +125,10 @@ func (g *gateway) storeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := writeDocument(output, r.Document); err != nil {
+			// Literal provider header values are credentials and are not written; staging the
+			// edited file restores each placeholder from the revision named by --expected.
+			shown := r.Document.Redacted()
+			if err := writeDocument(output, &shown); err != nil {
 				return err
 			}
 			return emit(c, map[string]any{"revision": r.ID, "output": output})

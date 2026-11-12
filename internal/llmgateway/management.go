@@ -225,6 +225,7 @@ func (m *managementAPI) readConfig(w http.ResponseWriter, r *http.Request, resou
 	// Resource reads must round-trip through PUT, which requires an explicit
 	// array rather than null when clearing a collection.
 	gateway := rev.Document.Gateway
+	gateway.Providers = redactProviders(gateway.Providers) // header values are credentials: never returned
 	if gateway.Providers == nil {
 		gateway.Providers = []ProviderConfig{}
 	}

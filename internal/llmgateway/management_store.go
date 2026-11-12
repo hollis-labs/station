@@ -152,6 +152,17 @@ func (s *ManagementStore) Save(ctx context.Context, d ManagementDocument, expect
 	if !validActor(actor) {
 		return r, errors.New("an actor of 1–256 bytes is required")
 	}
+	if d.hasRedactedHeader() {
+		var base *ManagementDocument
+		if expectedLatest > 0 {
+			if b, err := s.Revision(ctx, expectedLatest); err == nil {
+				base = b.Document
+			}
+		}
+		if err := d.restoreRedacted(base); err != nil {
+			return r, err
+		}
+	}
 	if err := d.Validate(); err != nil {
 		return r, err
 	}
@@ -301,4 +312,81 @@ func (s *ManagementStore) Activations(ctx context.Context, before int64, limit i
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// RedactedHeader stands in for the value of a literal provider header in any document shown to a
+// reader (the management GET, `gateway-store show`). Header values are credentials by another name
+// (an Authorization or API-key header), so they are never returned. A document with the placeholder
+// can still be saved back: Save restores each placeholder from the revision it was edited from.
+const RedactedHeader = "[redacted]"
+
+// Redacted returns a copy of d whose literal provider header values are replaced by RedactedHeader.
+// Header names stay. The receiver is not changed.
+func (d ManagementDocument) Redacted() ManagementDocument {
+	d.Gateway.Providers = redactProviders(d.Gateway.Providers)
+	return d
+}
+
+func redactProviders(in []ProviderConfig) []ProviderConfig {
+	if in == nil {
+		return nil
+	}
+	out := make([]ProviderConfig, len(in))
+	copy(out, in)
+	for i := range out {
+		if len(out[i].Headers) == 0 {
+			continue
+		}
+		h := make(map[string]string, len(out[i].Headers))
+		for k := range out[i].Headers {
+			h[k] = RedactedHeader
+		}
+		out[i].Headers = h
+	}
+	return out
+}
+
+// restoreRedacted replaces every RedactedHeader value in d by the value the same provider and header
+// have in base, the revision d was edited from. A placeholder with no counterpart is an error: there
+// is no value to restore, and storing the placeholder would break the provider.
+func (d *ManagementDocument) restoreRedacted(base *ManagementDocument) error {
+	for i := range d.Gateway.Providers {
+		p := &d.Gateway.Providers[i]
+		for name, v := range p.Headers {
+			if v != RedactedHeader {
+				continue
+			}
+			var old string
+			var found bool
+			if base != nil {
+				for _, bp := range base.Gateway.Providers {
+					if bp.ID == p.ID {
+						old, found = bp.Headers[name]
+					}
+				}
+			}
+			if !found || old == RedactedHeader {
+				return fmt.Errorf("provider %q header %q is the %s placeholder and the revision being edited has no value for it: give the real value", p.ID, name, RedactedHeader)
+			}
+			// Copy before writing: the map may be shared with the caller's document.
+			h := make(map[string]string, len(p.Headers))
+			for k, val := range p.Headers {
+				h[k] = val
+			}
+			h[name] = old
+			p.Headers = h
+		}
+	}
+	return nil
+}
+
+func (d ManagementDocument) hasRedactedHeader() bool {
+	for _, p := range d.Gateway.Providers {
+		for _, v := range p.Headers {
+			if v == RedactedHeader {
+				return true
+			}
+		}
+	}
+	return false
 }
