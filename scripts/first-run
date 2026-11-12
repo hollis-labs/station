@@ -37,12 +37,12 @@ case "$unit" in
   llm-gateway)
     data_env=LLM_GATEWAY_DATA_DIR
     clients=("station-operator|llm-gateway.*"
-             "station-smoke|llm-gateway.chat,llm-gateway.models.read,llm-gateway.embed,llm-gateway.decide") ;;
+             "station-smoke|llm-gateway.chat,llm-gateway.models.read,llm-gateway.embed,llm-gateway.decide"
+             "usage-collector|llm-gateway.usage.read") ;;
   usage-monitor)
     data_env=USAGE_MONITOR_DATA_DIR
     clients=("usage-operator|usage-monitor.read,usage-monitor.manage,usage-monitor.collect"
-             "usage-reader|usage-monitor.read"
-             "gateway-usage-reader|usage-monitor.read") ;;
+             "usage-reader|usage-monitor.read") ;;
   *) echo "unknown unit: $unit" >&2; exit 2 ;;
 esac
 

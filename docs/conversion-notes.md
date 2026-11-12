@@ -541,3 +541,32 @@ on every table (column lists from the old schema) and by comparing `sqlite_seque
 
 The pause for a cutover is the migration time plus the old unit's stop and the new unit's start; the migration itself is
 under three seconds on the live data. The driver's copies were only read; the scratch copies were deleted afterwards.
+
+## Who is meant to hold each client key (from the code and docs; the driver confirms with the owner)
+
+| Old client (live) | Meant holder (from code) | New key, issued by | Scopes |
+|---|---|---|---|
+| `station-operator` (gateway) | the owner by hand: management (`gateway-store`, management API), and the live relay clients named in `docs/llm-gateway-adoption.md` | llm-gateway | `llm-gateway.*` |
+| `station-smoke` (gateway) | `scripts/gateway-smoke.py` | llm-gateway | `chat`, `models.read`, `embed`, `decide` |
+| `usage-operator` (usage) | the owner by hand (account edits, manual collect) | usage-monitor | `read`, `manage`, `collect` |
+| `usage-reader` (usage) | dashboards and read-only callers | usage-monitor | `read` |
+| new: `usage-collector` | the usage monitor's own `gateway` collector, via `credential_ref` | llm-gateway | `llm-gateway.usage.read` |
+
+**The gateway collector.** The collector calls `GET <gateway_url>/v1/usage/export`, which needs `llm-gateway.usage.read`. The live
+gateway holds only `station-operator` (`llm-gateway.*`) and `station-smoke` (no usage scope), so if a gateway collector is
+configured live it presents the operator's token, or it is not configured. The driver reads the live usage config structure
+(source ids and collectors, no values) to say which. In the new design it holds its own key `usage-collector` with the one
+scope it needs, issued by the gateway and stored in a file or keychain reference named by `credential_ref`. An earlier draft of
+`scripts/first-run` created a `gateway-usage-reader` key on the usage unit; that was wrong (the usage unit's keys do not
+authorise calls to the gateway) and is replaced by `usage-collector` on the gateway unit.
+
+**Push reporters** (`principal`) are not in the live keys file; each needs a key on the usage unit with `usage-monitor.ingest`,
+and its source `principal` becomes `key:<id>`.
+
+## Stop timeouts for the service manager (recorded here, written into the deploy descriptors' drop-ins)
+
+| Unit | Drain | Close | `TimeoutStopSec` must exceed |
+|---|---|---|---|
+| llm-gateway | 15 s | 10 s | 25 s (the driver asks for the drop-in in the descriptor) |
+| usage-monitor | 10 s | 10 s collectors | 20 s |
+| MCP host (avatar, design) | engine stop | busy child may outlive it | above 17 s; no `KillMode=process` (Cerberus CW-20261112-0057) |

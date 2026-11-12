@@ -130,7 +130,7 @@ func TestFirstRunScript(t *testing.T) {
 	if strings.Contains(out, "a long test passphrase") {
 		t.Fatal("the password appears in the script output")
 	}
-	for _, c := range []string{"usage-operator", "usage-reader", "gateway-usage-reader"} {
+	for _, c := range []string{"usage-operator", "usage-reader"} {
 		f := filepath.Join(keys, c+".key")
 		st, err := os.Stat(f)
 		if err != nil || st.Mode().Perm() != 0o600 {
