@@ -32,7 +32,7 @@ func echoPIDs(t *testing.T) []int {
 func TestChildCrashIsSupervised(t *testing.T) {
 	base, _ := started(t)
 	owner := newSession(t, base)
-	owner.want(200, "POST", "/api/setup", map[string]any{"display_name": "Owner", "username": "owner", "password": "a long test passphrase"})
+	owner.signIn()
 	k := owner.want(201, "POST", "/api/identity/keys", map[string]any{"name": "all", "scopes": []string{"station.*"}})
 	key := ""
 	for _, v := range k {
@@ -94,7 +94,7 @@ func TestLongResponseOutlivesHeaderTimeout(t *testing.T) {
       serve: {http: {path: /slow}}
 `, fake), nil)
 	owner := newSession(t, base)
-	owner.want(200, "POST", "/api/setup", map[string]any{"display_name": "Owner", "username": "owner", "password": "a long test passphrase"})
+	owner.signIn()
 	k := owner.want(201, "POST", "/api/identity/keys", map[string]any{"name": "all", "scopes": []string{"station.slow"}})
 	key := ""
 	for _, v := range k {
@@ -183,8 +183,25 @@ func TestRealBinarySIGTERMWithCallInFlight(t *testing.T) {
 	if err := os.WriteFile(cfg, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	env := append(os.Environ(), "STATION_DATA_DIR="+filepath.Join(tmp, "data"), "SUBSTRATE_CONFIG="+cfg)
+	// First-run setup is offline: the owner and the caller's key are created with the binary's own
+	// commands before it serves, as the cutover script does.
+	setup := exec.Command(bin, "identity", "setup", "--username", "owner")
+	setup.Env, setup.Stdin = env, strings.NewReader(ownerPassphrase+"\n")
+	if out, err := setup.CombinedOutput(); err != nil {
+		t.Fatalf("identity setup: %v\n%s", err, out)
+	}
+	keyOut, err := func() ([]byte, error) {
+		c := exec.Command(bin, "identity", "key", "create", "--name", "slow", "--scope", "station.slow", "--stdout")
+		c.Env = env
+		return c.Output()
+	}()
+	if err != nil {
+		t.Fatalf("identity key create: %v", err)
+	}
+	key := strings.TrimSpace(string(keyOut))
 	cmd := exec.Command(bin, "serve")
-	cmd.Env = append(os.Environ(), "STATION_DATA_DIR="+filepath.Join(tmp, "data"), "SUBSTRATE_CONFIG="+cfg)
+	cmd.Env = env
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -201,15 +218,6 @@ func TestRealBinarySIGTERMWithCallInFlight(t *testing.T) {
 			t.Fatal("the binary never listened")
 		}
 		time.Sleep(100 * time.Millisecond)
-	}
-	owner := newSession(t, base)
-	owner.want(200, "POST", "/api/setup", map[string]any{"display_name": "Owner", "username": "owner", "password": "a long test passphrase"})
-	k := owner.want(201, "POST", "/api/identity/keys", map[string]any{"name": "slow", "scopes": []string{"station.slow"}})
-	key := ""
-	for _, v := range k {
-		if s, ok := v.(string); ok && strings.HasPrefix(s, "key_") {
-			key = s
-		}
 	}
 	go func() {
 		req, _ := http.NewRequest("POST", base+"/slow", strings.NewReader(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"sleep","arguments":{"ms":"60000"}}}`))

@@ -10,7 +10,7 @@ require (
 	github.com/hollis-labs/libs/security/policy v0.1.0
 	github.com/hollis-labs/libs/security/redact v0.2.0
 	github.com/hollis-labs/libs/security/secrets v0.1.0
-	github.com/hollis-labs/substrate v0.1.1-0.20261112141608-bac8c60147a8
+	github.com/hollis-labs/substrate v0.1.1-0.20261112162132-d453ac897397
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/spf13/cobra v1.10.2
@@ -38,6 +38,7 @@ require (
 	github.com/sethvargo/go-retry v0.5.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
+	golang.org/x/term v0.47.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	modernc.org/libc v1.78.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

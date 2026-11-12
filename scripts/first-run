@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# First-run setup of one Station unit, non-interactively and offline (no server running).
+#
+#   scripts/first-run UNIT
+#
+# UNIT is avatar-station, design-station, llm-gateway or usage-monitor. It creates the unit's owner
+# and the API keys its clients need, with the unit binary's own `identity setup` and
+# `identity key create` commands, which run through the normal boot and so place the database, the
+# signing key and the secrets as the server will. Key files are new 0600 files named for the client,
+# never overwritten; hand each to its client's owner by a private channel, never by mail or in a prompt.
+#
+# Environment (all required, nothing is read from arguments):
+#   FIRST_RUN_BIN            the unit's binary
+#   SUBSTRATE_CONFIG         the unit's config file (the same one the unit serves with)
+#   FIRST_RUN_DATA_DIR       the unit's data directory, absolute. It is exported to the binary as the
+#                            variable that binary reads (STATION_DATA_DIR for avatar-station and
+#                            design-station, LLM_GATEWAY_DATA_DIR, USAGE_MONITOR_DATA_DIR). Without an
+#                            explicit directory the binary would use the live one for its app name, so the
+#                            script refuses to run without it.
+#   FIRST_RUN_PASSWORD_FILE  a 0600 file whose first line is the owner's password (read through stdin,
+#                            never an argument or an environment variable)
+#   FIRST_RUN_KEYS_DIR       an existing 0700 directory that receives the key files
+# Optional: FIRST_RUN_OWNER (default "operator").
+set -euo pipefail
+
+unit="${1:-}"
+[ "$#" -eq 1 ] || { echo "usage: scripts/first-run avatar-station|design-station|llm-gateway|usage-monitor" >&2; exit 2; }
+
+# client -> comma-separated scopes, one entry per key the unit needs
+case "$unit" in
+  avatar-station)
+    data_env=STATION_DATA_DIR
+    clients=("tether-avatar|station.avatar") ;;
+  design-station)
+    data_env=STATION_DATA_DIR
+    clients=("tether-design|station.design-suite,station.tripo") ;;
+  llm-gateway)
+    data_env=LLM_GATEWAY_DATA_DIR
+    clients=("station-operator|llm-gateway.*"
+             "station-smoke|llm-gateway.chat,llm-gateway.models.read,llm-gateway.embed,llm-gateway.decide") ;;
+  usage-monitor)
+    data_env=USAGE_MONITOR_DATA_DIR
+    clients=("usage-operator|usage-monitor.read,usage-monitor.manage,usage-monitor.collect"
+             "usage-reader|usage-monitor.read"
+             "gateway-usage-reader|usage-monitor.read") ;;
+  *) echo "unknown unit: $unit" >&2; exit 2 ;;
+esac
+
+need() { [ -n "${!1:-}" ] || { echo "first-run: $1 must be set" >&2; exit 2; }; }
+for v in FIRST_RUN_BIN SUBSTRATE_CONFIG FIRST_RUN_DATA_DIR FIRST_RUN_PASSWORD_FILE FIRST_RUN_KEYS_DIR; do need "$v"; done
+case "$FIRST_RUN_DATA_DIR" in /*) ;; *) echo "first-run: FIRST_RUN_DATA_DIR must be an absolute path" >&2; exit 2 ;; esac
+[ -x "$FIRST_RUN_BIN" ] || { echo "first-run: FIRST_RUN_BIN is not an executable file" >&2; exit 2; }
+[ -f "$SUBSTRATE_CONFIG" ] || { echo "first-run: SUBSTRATE_CONFIG is not a file" >&2; exit 2; }
+[ -f "$FIRST_RUN_PASSWORD_FILE" ] && [ "$(stat -c %a "$FIRST_RUN_PASSWORD_FILE")" = 600 ] \
+  || { echo "first-run: FIRST_RUN_PASSWORD_FILE must be a file with mode 0600" >&2; exit 2; }
+[ -d "$FIRST_RUN_KEYS_DIR" ] && [ "$(stat -c %a "$FIRST_RUN_KEYS_DIR")" = 700 ] \
+  || { echo "first-run: FIRST_RUN_KEYS_DIR must be an existing directory with mode 0700" >&2; exit 2; }
+
+export SUBSTRATE_CONFIG
+export "$data_env=$FIRST_RUN_DATA_DIR"
+owner="${FIRST_RUN_OWNER:-operator}"
+
+# The owner first (refuses if one exists, so a second run changes nothing), then each client's key.
+head -n 1 "$FIRST_RUN_PASSWORD_FILE" | "$FIRST_RUN_BIN" identity setup --username "$owner"
+for entry in "${clients[@]}"; do
+  name="${entry%%|*}"
+  scopes="${entry#*|}"
+  "$FIRST_RUN_BIN" identity key create --name "$name" --scope "$scopes" --out "$FIRST_RUN_KEYS_DIR/$name.key" >/dev/null
+  echo "first-run: $unit: key for $name written to $FIRST_RUN_KEYS_DIR/$name.key"
+done
+echo "first-run: $unit: done (owner $owner, ${#clients[@]} key file(s))"

@@ -68,7 +68,16 @@ func (e *events) get() []string {
 // base URL and a stop function that returns the shutdown events once serve has ended.
 func started(t *testing.T) (string, func() []string) {
 	t.Helper()
-	return startedWith(t, fmt.Sprintf(`    - id: echo
+	base, stop, app := startedFirstRun(t)
+	createOwner(t, app)
+	return base, stop
+}
+
+// startedFirstRun is started before any owner exists, and also returns the running app so the test
+// can create the owner with the identity command.
+func startedFirstRun(t *testing.T) (string, func() []string, *module.App) {
+	t.Helper()
+	return startStack(t, fmt.Sprintf(`    - id: echo
       name: Echo
       transport: process
       process: {command: %q, args: []}
@@ -85,6 +94,13 @@ func started(t *testing.T) (string, func() []string) {
 // the caller. provision, when set, runs after the modules start and before serve, so a test can put
 // stand-in values in the secrets store that the config refers to.
 func startedWith(t *testing.T, servers string, provision func(context.Context, *module.App)) (string, func() []string) {
+	t.Helper()
+	base, stop, app := startStack(t, servers, provision)
+	createOwner(t, app)
+	return base, stop
+}
+
+func startStack(t *testing.T, servers string, provision func(context.Context, *module.App)) (string, func() []string, *module.App) {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "data")
 	override := fmt.Sprintf(`httphost: {addr: "127.0.0.1:0"}
@@ -136,13 +152,34 @@ station:
 	t.Cleanup(func() { stop() })
 	select {
 	case a := <-addr:
-		return "http://" + a.String(), stop
+		return "http://" + a.String(), stop, run.App
 	case err := <-done:
 		t.Fatalf("serve returned before listening: %v", err)
 	case <-time.After(20 * time.Second):
 		t.Fatal("serve never listened")
 	}
-	return "", stop
+	return "", stop, run.App
+}
+
+const ownerPassphrase = "a long test passphrase"
+
+// createOwner runs the real `identity setup` command against the running app (the password comes
+// from stdin, as the command reads it), so tests never use the HTTP setup, which is always refused.
+func createOwner(t *testing.T, app *module.App) {
+	t.Helper()
+	root := (&station{app: app}).root(context.Background(), []string{"identity", "setup", "--username", "owner", "--display-name", "Owner"})
+	root.SetIn(strings.NewReader(ownerPassphrase + "\n"))
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("identity setup: %v", err)
+	}
+}
+
+// signIn opens the owner's session (the cookie jar keeps it).
+func (s *session) signIn() {
+	s.t.Helper()
+	s.want(200, "POST", "/api/login", map[string]any{"username": "owner", "password": ownerPassphrase})
 }
 
 type session struct {
@@ -225,7 +262,7 @@ func childAlive(t *testing.T) bool {
 }
 
 func TestAcceptance(t *testing.T) {
-	base, stop := started(t)
+	base, stop, app := startedFirstRun(t)
 
 	// The host is up; health is open; the engine's two children run.
 	anon := newSession(t, base)
@@ -237,13 +274,21 @@ func TestAcceptance(t *testing.T) {
 	if code, _ := mcp(t, base, "/echo", "", initialize); code != 401 {
 		t.Fatalf("anonymous /echo = %d, want 401", code)
 	}
-	if st := anon.want(200, "GET", "/api/setup", nil); st["setup_required"] != true {
-		t.Fatalf("first run should require setup: %v", st)
+	if st := anon.want(200, "GET", "/api/setup", nil); st["setup_required"] != true || st["setup_over_http"] != false {
+		t.Fatalf("first run should require setup, offline only: %v", st)
+	}
+	// Setting up over HTTP is always refused; the owner is created with the command.
+	if code, body := anon.do("POST", "/api/setup", map[string]any{"display_name": "Owner", "username": "owner", "password": ownerPassphrase}, nil); code != 403 || !strings.Contains(string(body), "setup_offline") {
+		t.Fatalf("POST /api/setup = %d %s, want 403 setup_offline", code, body)
+	}
+	createOwner(t, app)
+	if st := anon.want(200, "GET", "/api/setup", nil); st["setup_required"] != false {
+		t.Fatalf("setup should be closed after the owner exists: %v", st)
 	}
 
-	// First-run setup creates the owner; the owner issues keys (shown once).
+	// The owner issues keys (shown once).
 	owner := newSession(t, base)
-	owner.want(200, "POST", "/api/setup", map[string]any{"display_name": "Owner", "username": "owner", "password": "a long test passphrase"})
+	owner.signIn()
 	issue := func(name string, scopes ...string) string {
 		k := owner.want(201, "POST", "/api/identity/keys", map[string]any{"name": name, "scopes": scopes})
 		for _, f := range []string{"key", "secret", "token"} {

@@ -63,7 +63,8 @@ func afterConfig(getenv func(string) string, prepare bool) boot.Hook {
 }
 
 // plan decides, from the command line, which framework modules to start and whether the data
-// directory may be created. Only serving (the default) and `secret set` write anything. Every
+// directory may be created. Only serving (the default), `secret set`, `identity setup` and
+// `identity key create` write anything. Every
 // other command, including validate, list, secret check and help, reads configuration and starts
 // no module that opens a file, so running one without STATION_DATA_DIR cannot touch the live
 // directory of the app name.
@@ -87,6 +88,9 @@ func plan(args []string) (modules []string, prepare bool) {
 		return substrateModules, true
 	case words[0] == "secret" && len(words) > 1 && words[1] == "set":
 		return pick(withSecrets), true
+	case words[0] == "identity" && len(words) > 1 && (words[1] == "setup" || (words[1] == "key" && len(words) > 2 && words[2] == "create")):
+		// Offline bootstrap: creates the database, the signing key and the owner or a key.
+		return pick(withIdentity), true
 	case words[0] == "secret" && len(words) > 1 && words[1] == "check":
 		return pick(withSecrets), false
 	}
@@ -96,6 +100,9 @@ func plan(args []string) (modules []string, prepare bool) {
 var (
 	readOnly    = []string{"config", "logging", "health", "cli"}
 	withSecrets = []string{"config", "logging", "secrets", "cli"}
+	// withIdentity is what `identity setup` and `identity key create` need: the database and the
+	// identity module and the auth module it requires (secrets because the boot hook places its directory). No listener.
+	withIdentity = []string{"config", "logging", "secrets", "auth", "database", "identity", "cli"}
 )
 
 // pick keeps the start order of substrateModules.

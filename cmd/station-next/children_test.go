@@ -73,7 +73,7 @@ func TestProductionChildShapes(t *testing.T) {
 	})
 
 	owner := newSession(t, base)
-	owner.want(200, "POST", "/api/setup", map[string]any{"display_name": "Owner", "username": "owner", "password": "a long test passphrase"})
+	owner.signIn()
 	k := owner.want(201, "POST", "/api/identity/keys", map[string]any{"name": "all", "scopes": []string{"station.*"}})
 	var key string
 	for _, v := range k {
