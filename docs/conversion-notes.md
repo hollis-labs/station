@@ -39,6 +39,19 @@ Survey only, no code converted. Data is in use: it is migrated, never moved asid
    name; no `scripts/scan-public` in the repo. Findings only, nothing changed (all since fixed; see the hygiene table).
 10. **Postgres ledger** is a container database published on loopback and a tailnet address, with a Cerberus descriptor
     and a compose file beside the gateway config (not in this repo). Cutover must preserve it untouched.
+11. **httphost rewrites the gateway's OpenAI-shaped errors (found at the start of cmd/llm-gateway; reported, waiting).**
+    `httphost.Handler` wraps every route and every mount in `apierr.Normalize`, which turns a JSON error body of the form
+    `{"error":{"code":"...","message":"..."}}` (status 400 and above) into the flat `{code, message}`. The gateway
+    exists to relay OpenAI- and Anthropic-compatible APIs, and its OpenAI-dialect errors are exactly that nested
+    shape: `{"error":{"message","type","param","code"}}` (`plugins/llm-gateway/dialects.go`). Run against
+    `apierr.Normalize` (probe, not committed): a 404 with `"code":"model_not_found"` comes out as
+    `{"code":"model_not_found","message":"The model does not exist"}`, so `error.type`, `error.param` and the nested
+    `error` object are gone, and an OpenAI SDK that reads `error.message` no longer finds it. Anthropic-shaped errors
+    (no `error.code`) and success and streaming responses are unaffected. There is no option on `Mount`, `Routes` or
+    `Options` to skip it. Not invented around: the gateway keeps its dialect errors as they are. What is needed from the
+    framework is an opt-out for a mount or route (a `Raw`/`NoNormalize` flag, or Normalize skipping a response that
+    carries a header the handler sets), or a scoping rule (normalize only the framework's own routes). Until then the
+    gateway's relay routes cannot serve OpenAI clients faithfully through `httphost`.
 
 ## Client list (live facts via the driver, read-only; ids and scopes only)
 
@@ -348,3 +361,26 @@ directory, and a second run changes nothing (setup refuses when an owner exists)
 directories and also covers the refusals. The llm-gateway and usage-monitor entries are in the script and get the same
 test when those binaries exist. At cutover the operator runs it once per unit before the unit serves on its live port,
 then hands each key file to its client's owner.
+
+## Management `/clients` routes: callers and what replaces them
+
+The old gateway stored hashed client keys inside its configuration revisions and managed them with
+`/api/llm-gateway/v1/management/clients` (scope `llm-gateway.management.credentials`). The owner decision is that the
+identity module issues keys, so these routes, the `clients` list inside a revision document and the
+`station client issue|revoke|list` command are not ported.
+
+| Caller found in this repository | What it does | Replacement |
+|---|---|---|
+| `station client issue\|revoke\|list` (`cmd/station/client.go`, offline, SQLite or keys file) | issue, revoke, list hashed gateway keys | `llm-gateway identity key create` (offline); list and revoke through `GET /api/identity/keys` and `DELETE /api/identity/keys/{id}` with an owner session |
+| `scripts/gateway-management-smoke.py` (`GET /clients`) | checks the list shows only id and scopes | the identity list route; the smoke script drops that check |
+| `docs/llm-gateway-management.md` route table | documents the five routes | rewritten for the identity routes |
+| `GET /clients` | list `{id, scopes}` | `GET /api/identity/keys` |
+| `POST /clients` | issue, token shown once | `POST /api/identity/keys` or the offline command |
+| `PUT /clients` (change scopes, keep the token) | edit scopes in place | no in-place edit in identity: create a new key with the new scopes, hand it over, revoke the old one |
+| `POST /clients/rotate` | new token, same scopes | create a new key with the same scopes, revoke the old one |
+| `DELETE /clients?id=` | stage a revocation | `DELETE /api/identity/keys/{id}` |
+
+Two things the replacement does not cover, for the owner: identity has no offline list or revoke command (revoking
+needs an owner session over HTTP), and a revision no longer records who held which key, so the audit of key changes
+moves from the revision history to identity's own records. Live callers of these routes are not known from the
+repository (the `station-operator` client holds `llm-gateway.*` and could call them); the driver is asked who does.
