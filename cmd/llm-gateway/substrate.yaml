@@ -1,0 +1,23 @@
+# The Station LLM gateway on Substrate. The manifest is the shell: modules and config.
+# Secure by default: the guard enforces and the service is its own identity provider, so
+# gateway clients use keys issued by the identity module (scopes llm-gateway.*).
+app: llm-gateway
+variant: service
+profiles: [minimal]
+modules:
+  add: [httphost, secrets, auth, database, identity, cli]
+config:
+  logging: { level: info, format: text }
+  httphost: { addr: "127.0.0.1:18085" }  # a port no live unit holds; the live gateway uses 18082 and is cut over by its own SUBSTRATE_CONFIG
+  # Relative paths here are resolved against the data directory (LLM_GATEWAY_DATA_DIR or the XDG
+  # data home) by the AfterConfig hook, after the SUBSTRATE_CONFIG override is applied.
+  database:
+    sqlite: { path: llm-gateway.db }
+  auth: { mode: enforce }
+  identity: { key_file: identity-signing.key }
+  secrets: { state_dir: secrets }
+  # The app's own block. The gateway configuration (providers, models, policy, budgets, ledger)
+  # is not here: it is the active revision in the service database, edited through the
+  # management API or `gateway-store`.
+  llm-gateway:
+    allowed_hosts: []

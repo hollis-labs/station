@@ -1,6 +1,8 @@
 # Go build artifacts
 /station
 /station-next
+/llm-gateway
+/usage-monitor
 /bin/
 *.exe
 *.exe~

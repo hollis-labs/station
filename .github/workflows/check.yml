@@ -28,7 +28,7 @@ jobs:
       - name: Lint (new code)
         # Scoped to the ported code. Widen to ./... once cmd/station, platform/ and plugins/ are gone
         # (see "What the last port must do" in docs/conversion-notes.md).
-        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run ./cmd/station-next/... ./internal/...
+        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run ./cmd/station-next/... ./cmd/llm-gateway/... ./internal/...
       - name: Pins match the Substrate BOM
         run: go run github.com/hollis-labs/substrate/cmd/substrate pins check --app .
       - name: Public hygiene (tree)
