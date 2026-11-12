@@ -3,8 +3,12 @@ package llmgateway
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -214,5 +218,77 @@ func TestRefuseLegacyDatabase(t *testing.T) {
 	}
 	if err := RefuseLegacyDatabase(path); err != nil {
 		t.Fatalf("a service database: %v", err)
+	}
+}
+
+// tree lists dir with each file's size, mode and content digest.
+func tree(t *testing.T, dir string) string {
+	t.Helper()
+	var b strings.Builder
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, _ := d.Info()
+		sum := ""
+		if !d.IsDir() {
+			raw, _ := os.ReadFile(p)
+			h := sha256.Sum256(raw)
+			sum = hex.EncodeToString(h[:])
+		}
+		fmt.Fprintf(&b, "%s %d %v %s\n", p, info.Size(), info.Mode(), sum)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
+// The old file is never written: after the start guard and a migration, its bytes, mode and
+// directory listing (no sidecar appeared) are exactly what they were, and the report proves it.
+func TestOldFileIsLeftExactlyAsItWas(t *testing.T) {
+	path := newLegacy(t).path
+	rollbackJournal(t, path)
+	dir := filepath.Dir(path)
+	before := tree(t, dir)
+	if err := RefuseLegacyDatabase(path); err == nil {
+		t.Fatal("the guard did not refuse an old database")
+	}
+	if after := tree(t, dir); after != before {
+		t.Fatalf("the guard changed the old file's directory:\n%s\nvs\n%s", before, after)
+	}
+	rep, err := MigrateLegacy(t.Context(), newGatewayDB(t), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	sum := sha256.Sum256(raw)
+	if !rep.SourceUnchanged || rep.SourceSHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatalf("report %+v does not match the file's sha256 %x", rep, sum)
+	}
+	if after := tree(t, dir); after != before {
+		t.Fatalf("the migration changed the old file's directory:\n%s\nvs\n%s", before, after)
+	}
+}
+
+// rollbackJournal puts the file in a plain rollback-journal database, as a copy that was never
+// opened by the service would be: opening it read-write with the service's settings switches it to WAL,
+// which rewrites its header. It fails the test if the file is not in that state afterwards.
+func rollbackJournal(t *testing.T, path string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	var mode string
+	if err = db.QueryRowContext(t.Context(), "PRAGMA journal_mode=DELETE").Scan(&mode); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	hdr, _ := os.ReadFile(path)
+	if hdr[18] != 1 || hdr[19] != 1 {
+		t.Fatalf("the fixture is not a rollback-journal file (header bytes %d %d)", hdr[18], hdr[19])
 	}
 }

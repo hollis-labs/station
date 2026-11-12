@@ -9,6 +9,8 @@ import (
 	"os"
 
 	"github.com/hollis-labs/libs/core/store"
+
+	"github.com/hollis-labs/station/internal/legacyfile"
 )
 
 // The old usage database (station's usage.db) is identified by this SQLite application id and
@@ -33,19 +35,32 @@ type LegacyReport struct {
 	Rows      map[string]int64  `json:"rows"`
 	Digests   map[string]string `json:"digests"`
 	Integrity string            `json:"integrity_check"`
+	// SourceSHA256 is the digest of the old file (and its -wal) taken before it was copied;
+	// SourceUnchanged says it still matched at the end. The old file is never opened by SQLite.
+	SourceSHA256    string `json:"source_sha256"`
+	SourceUnchanged bool   `json:"source_unchanged"`
 }
 
 // MigrateLegacy copies an old usage.db into the (empty) service database in one transaction, keeping
 // every sequence, then verifies a digest of each table's rows against the old file before the commit,
 // so on any error nothing is written to dst. Run it with the old unit stopped (usage is written
 // continuously: copying a live file would lose what arrives after the copy) and on an online-backup
-// copy of the file: opening a file moves it to WAL and may create sidecar files.
+// copy of the file as well: the file is only ever read as bytes (a private copy is what SQLite opens),
+// and the report carries its sha256 and whether it still matched at the end.
 func MigrateLegacy(ctx context.Context, dst *store.Store, legacyPath string) (LegacyReport, error) {
 	rep := LegacyReport{Rows: map[string]int64{}, Digests: map[string]string{}}
 	if _, err := os.Stat(legacyPath); err != nil {
 		return rep, err
 	}
-	old, err := store.Open(ctx, store.Config{Driver: store.DriverSQLite, SQLite: store.SQLiteConfig{Path: legacyPath, ReadConns: 1}})
+	// SQLite never opens the old file: a read-write open switches it to WAL and may create sidecars.
+	// A private copy is opened instead, and the source's digest is proved unchanged at the end.
+	snap, err := legacyfile.Take(legacyPath)
+	if err != nil {
+		return rep, fmt.Errorf("copy the old usage database aside: %w", err)
+	}
+	defer snap.Close()
+	rep.SourceSHA256 = snap.SHA256
+	old, err := store.Open(ctx, store.Config{Driver: store.DriverSQLite, SQLite: store.SQLiteConfig{Path: snap.Path, ReadConns: 1}})
 	if err != nil {
 		return rep, fmt.Errorf("open the old usage database: %w", err)
 	}
@@ -112,6 +127,11 @@ func MigrateLegacy(ctx context.Context, dst *store.Store, legacyPath string) (Le
 	if rep.Integrity != "ok" {
 		return rep, fmt.Errorf("the service database fails its integrity check after the copy: %s", rep.Integrity)
 	}
+	rep.SourceSHA256 = snap.SHA256
+	if same, e := snap.Unchanged(); e != nil || !same {
+		return rep, errors.New("the old file changed during the migration: discard the new database and copy a fresh backup")
+	}
+	rep.SourceUnchanged = true
 	return rep, nil
 }
 
@@ -187,27 +207,15 @@ func digest(ctx context.Context, q store.Querier, table, order string) (string, 
 
 // RefuseLegacyDatabase is a start guard: it returns an error when path is an old usage.db, so a
 // service never opens (and migrates around) the old file. A missing file is fine. The identity is
-// read through SQLite, not from the file header: an old database in WAL mode can keep its header
-// change in the -wal file until a checkpoint.
+// read from the file header by legacyfile, which never opens the file through SQLite (that would
+// switch it to WAL): only an uncheckpointed -wal sidecar, which can hold a newer header, makes it
+// read a private copy.
 func RefuseLegacyDatabase(path string) error {
-	info, err := os.Stat(path)
-	if errors.Is(err, os.ErrNotExist) || (err == nil && info.Size() == 0) {
-		return nil
-	}
+	id, known, err := legacyfile.ApplicationID(context.Background(), path)
 	if err != nil {
 		return err
 	}
-	ctx := context.Background()
-	st, err := store.Open(ctx, store.Config{Driver: store.DriverSQLite, SQLite: store.SQLiteConfig{Path: path, ReadConns: 1}})
-	if err != nil {
-		return nil // not a database SQLite can open: the database module reports it
-	}
-	defer func() { _ = st.Close() }()
-	var appID int64
-	if err := st.Reader().QueryRowContext(ctx, "PRAGMA application_id").Scan(&appID); err != nil {
-		return nil
-	}
-	if appID == legacyApplicationID {
+	if known && id == legacyApplicationID {
 		return fmt.Errorf("%s is an old Station usage database; the service keeps its data in its own database. Copy the old data with `usage-monitor migrate-from` into a new data directory instead", path)
 	}
 	return nil
