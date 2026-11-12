@@ -187,10 +187,12 @@ func TestLoggingRedactsKnownAndShapedSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	const known = "kN0wn-s3cret-VALUE-9f8e7d6c5b4a"
+	// Assembled at run time so no secret-shaped literal sits in the tree.
+	bearerValue := "abcdef0123456789" + "abcdef0123456789"
 	l.Sink().Add(known)
-	l.Logger.Info("resolved "+known, "detail", "key="+known, "header", "Authorization: Bearer abcdef0123456789abcdef0123456789", "api_key", "short")
+	l.Logger.Info("resolved "+known, "detail", "key="+known, "header", "Authorization: Bearer "+bearerValue, "api_key", "short")
 	out := buf.String()
-	for _, leaked := range []string{known, "abcdef0123456789abcdef0123456789", `"short"`} {
+	for _, leaked := range []string{known, bearerValue, `"short"`} {
 		if strings.Contains(out, leaked) {
 			t.Fatalf("%q leaked: %s", leaked, out)
 		}

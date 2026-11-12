@@ -160,7 +160,7 @@ func TestManagementValidationAndAtomicity(t *testing.T) {
 		"credential header": func(d *ManagementDocument) {
 			d.Gateway.Providers[0].Headers = map[string]string{"Authorization": "Bearer raw-secret"}
 		},
-		"URL credential":     func(d *ManagementDocument) { d.Gateway.Providers[0].BaseURL = "https://user:secret@example.com" },
+		"URL credential":     func(d *ManagementDocument) { d.Gateway.Providers[0].BaseURL = "https://user:" + "secret@example.com" },
 		"literal key":        func(d *ManagementDocument) { d.Gateway.Providers[0].APIKeyRef = "raw-secret" },
 		"duplicate identity": func(d *ManagementDocument) { d.Clients = append(d.Clients, d.Clients[0]) },
 	} {

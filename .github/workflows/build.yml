@@ -4,12 +4,35 @@ on:
   pull_request:
   workflow_dispatch:
 permissions: { contents: read }
+# Station ships three binaries. The reusable workflow builds one binary and one descriptor per call, so there are three
+# calls, one artifact each. The tarball's descriptor is the file `deploy.yaml` at the repository root; the reusable
+# workflow has no descriptor input, so each call copies deploy/<app>.yaml over it first (ui_cmd, which runs before the
+# build). Follow-up: a descriptor input and multi-binary support in hollis-labs/tools (filed by the driver).
 jobs:
-  build:
+  station:
     uses: hollis-labs/tools/.github/workflows/go-app-build.yml@145fb50d827a1af7e38236eda5751cee22970ba5   # tools main (extra_files, pre_test_cmd)
     with:
       app: station
-      main_pkg: ./cmd/station
+      main_pkg: ./cmd/station-next
       binary: station
+      ui_cmd: 'cp deploy/station.yaml deploy.yaml'
+      test_cmd: 'test -z "$(gofmt -l .)" && go mod tidy -diff && go build ./... && go vet ./... && go test -race -count=1 -timeout 4m ./...'
+      extra_files: deploy.yaml
+  llm-gateway:
+    uses: hollis-labs/tools/.github/workflows/go-app-build.yml@145fb50d827a1af7e38236eda5751cee22970ba5
+    with:
+      app: llm-gateway
+      main_pkg: ./cmd/llm-gateway
+      binary: llm-gateway
+      ui_cmd: 'cp deploy/llm-gateway.yaml deploy.yaml'
+      test_cmd: 'test -z "$(gofmt -l .)" && go mod tidy -diff && go build ./... && go vet ./... && go test -race -count=1 -timeout 4m ./...'
+      extra_files: deploy.yaml
+  usage-monitor:
+    uses: hollis-labs/tools/.github/workflows/go-app-build.yml@145fb50d827a1af7e38236eda5751cee22970ba5
+    with:
+      app: usage-monitor
+      main_pkg: ./cmd/usage-monitor
+      binary: usage-monitor
+      ui_cmd: 'cp deploy/usage-monitor.yaml deploy.yaml'
       test_cmd: 'test -z "$(gofmt -l .)" && go mod tidy -diff && go build ./... && go vet ./... && go test -race -count=1 -timeout 4m ./...'
       extra_files: deploy.yaml

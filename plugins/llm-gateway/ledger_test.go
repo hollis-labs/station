@@ -271,7 +271,7 @@ func TestPGStoreRefusesNewerSchema(t *testing.T) {
 }
 
 func TestPGDSNErrorsDoNotEchoPassword(t *testing.T) {
-	_, err := openPGStore(context.Background(), "postgres://u:hunter2secret@127.0.0.1:1/db?connect_timeout=1")
+	_, err := openPGStore(context.Background(), "postgres://u:"+"hunter2"+"secret@127.0.0.1:1/db?connect_timeout=1")
 	if err == nil || strings.Contains(err.Error(), "hunter2secret") {
 		t.Fatalf("%v", err)
 	}

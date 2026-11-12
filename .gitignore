@@ -1,5 +1,8 @@
 # Go build artifacts
 /station
+/station-next
+/llm-gateway
+/usage-monitor
 /bin/
 *.exe
 *.exe~
@@ -48,3 +51,7 @@ __pycache__/
 *.db
 *.db-wal
 *.db-shm
+
+# The shared CI build writes dist/ inside the checkout before `go build`; an untracked file makes Go stamp the
+# binary +dirty (tools follow-up CW-20261112-0123).
+/dist/

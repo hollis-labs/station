@@ -34,11 +34,11 @@ plugins:
       - id: go-api
         account_id: go-workspace
         collector: opencode-go
-        credential_ref: keychain://station/opencode-go
+        credential_ref: keychain://opencode/zen
       - id: gateway-openai
         account_id: openai-api
         collector: gateway
-        gateway_url: https://llm.nanite.cloud/api/llm-gateway
+        gateway_url: https://gateway.example.test/api/llm-gateway
         credential_ref: file:///private/station/usage/gateway-reader.token
       - id: laptop-claude
         account_id: claude-personal

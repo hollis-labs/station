@@ -1,0 +1,50 @@
+schema: fleet-deploy/v1
+app: station
+repo: hollis-labs/station
+artifact: {name: "station-{sha12}", tarball: "station_{version}_{os}_{arch}.tar.gz", sums: SHA256SUMS}
+targets:
+  # The MCP host runs as two units from one binary; each has its own config file and data directory (identity and
+  # database), so the two never share state. The binaries they replace are plain files: the first deploy keeps each as
+  # <name>.pre-fleet-install, which is the rollback. WorkingDirectory is left as the Cerberus unit has it.
+  - id: agent-os-avatar-station
+    when: {os: linux, arch: amd64}
+    hosts: [agent-os]
+    binary: station
+    install_root: ~/.local/share/fleet/releases/station
+    symlinks:
+      - path: ~/.local/libexec/station/station
+    unit_dropins:
+      - unit: com.hollis-labs.cerberus.avatar-station.service
+        name: 20-fleet-exec.conf
+        content: |
+          [Service]
+          ExecStart=
+          ExecStart="%h/.local/libexec/station/station" "serve"
+          Environment=SUBSTRATE_CONFIG=%h/.config/station/avatar-station.substrate.yaml
+          Environment=STATION_DATA_DIR=%h/.local/share/avatar-station
+          TimeoutStopSec=30
+    restart:
+      - {via: systemd-user, unit: com.hollis-labs.cerberus.avatar-station.service}
+    health:
+      - {url: "http://127.0.0.1:8097/healthz", expect_status: [200], timeout: 30s}
+  - id: agent-os-design-station
+    when: {os: linux, arch: amd64}
+    hosts: [agent-os]
+    binary: station
+    install_root: ~/.local/share/fleet/releases/station
+    symlinks:
+      - path: ~/.local/libexec/design-station/station
+    unit_dropins:
+      - unit: com.hollis-labs.cerberus.design-station.service
+        name: 20-fleet-exec.conf
+        content: |
+          [Service]
+          ExecStart=
+          ExecStart="%h/.local/libexec/design-station/station" "serve"
+          Environment=SUBSTRATE_CONFIG=%h/.config/station/design-station.substrate.yaml
+          Environment=STATION_DATA_DIR=%h/.local/share/design-station
+          TimeoutStopSec=30
+    restart:
+      - {via: systemd-user, unit: com.hollis-labs.cerberus.design-station.service}
+    health:
+      - {url: "http://127.0.0.1:8110/healthz", expect_status: [200], timeout: 30s}
