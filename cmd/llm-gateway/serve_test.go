@@ -302,3 +302,86 @@ func TestServedThroughTheTLSProxyName(t *testing.T) {
 		t.Fatal("the binary did not exit after SIGTERM")
 	}
 }
+
+// The live units carry HOLLIS_AUTH_STATION=permissive (a dev posture dial added to the old build's units).
+// The unit's own auth.mode is enforce and the module reads the environment only when the config sets no
+// mode, so the variable, and its general and per-app forms, must change nothing: no credential, no entry.
+// The unit also runs from an empty working directory and must leave it empty.
+func TestAmbientAuthPostureDoesNotWeakenEnforcement(t *testing.T) {
+	u := newUnit(t, "")
+	u.env = append(u.env, "HOLLIS_AUTH_STATION=permissive", "HOLLIS_AUTH_LLM_GATEWAY=permissive", "HOLLIS_AUTH=off")
+	u.mustRun(ownerPassphrase+"\n", "identity", "setup", "--username", "owner")
+	ops := strings.TrimSpace(u.mustRunStdout("", "identity", "key", "create", "--name", "ops", "--scope", "llm-gateway.management.read", "--stdout"))
+	u.mustRunStdout("", "gateway-store", "stage", "--input", writeFile(t, "doc.json", gatewayDoc(t)), "--expected", "0", "--actor", "test")
+	u.mustRun("", "gateway-store", "activate", "--revision", "1", "--expected", "0", "--actor", "test")
+
+	cmd := u.command("", "serve")
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	base := "http://" + u.addr
+	for i := 0; ; i++ {
+		if r, err := http.Get(base + "/healthz"); err == nil {
+			_ = r.Body.Close()
+			break
+		}
+		if i > 100 {
+			t.Fatalf("the binary never listened\n%s", stderr.String())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	call := func(key string) int {
+		t.Helper()
+		req, _ := http.NewRequest("GET", base+"/api/llm-gateway/v1/management/status", nil)
+		if key != "" {
+			req.Header.Set("Authorization", "Bearer "+key)
+		}
+		res, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = res.Body.Close()
+		return res.StatusCode
+	}
+	for _, tc := range []struct {
+		name, key string
+		want      int
+	}{
+		{"no credential", "", 401},
+		{"wrong credential", "not-a-key", 401},
+		{"valid credential (control: the server answers)", ops, 200},
+	} {
+		if got := call(tc.key); got != tc.want {
+			t.Errorf("%s: %d, want %d", tc.name, got, tc.want)
+		}
+	}
+	// The guard reports the mode it runs in: the configured one, whatever the environment says.
+	req, _ := http.NewRequest("GET", base+"/api/me", nil)
+	req.Header.Set("Authorization", "Bearer "+ops)
+	res, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meBody, _ := io.ReadAll(res.Body)
+	_ = res.Body.Close()
+	if res.StatusCode != 200 || !strings.Contains(string(meBody), `"mode":"enforce"`) {
+		t.Errorf("/api/me = %d %s, want mode enforce", res.StatusCode, meBody)
+	}
+	_ = cmd.Process.Signal(syscall.SIGTERM)
+	select {
+	case err := <-exited:
+		if err != nil {
+			t.Fatalf("exit status %v\n%s", err, stderr.String())
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the binary did not exit after SIGTERM")
+	}
+	if left, _ := os.ReadDir(u.work); len(left) != 0 {
+		t.Errorf("the working directory is not empty after a run: %d entries", len(left))
+	}
+}

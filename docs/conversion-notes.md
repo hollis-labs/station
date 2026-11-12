@@ -749,4 +749,24 @@ Dry runs on the server host passed for all four targets (nothing changed). Three
 3. **MCP-host rollback.** Both binaries are plain files today; the first deploy keeps each as `<name>.pre-fleet-install` (as Loom's real deploy did),
    and that is the rollback point (relink or restore, restart).
 
-Runbook note: `fleet-install deploy station` needs `--target agent-os-avatar-station` or `--target agent-os-design-station` (two targets match the host).
+Runbook note: `fleet-install deploy station` needs `--target` with one of the two target ids in `deploy/station.yaml` (avatar-station or design-station; two targets match the host).
+
+## Two live drop-ins the units carry besides the installer's (driver, 2026-11-12; tests below)
+
+1. **`30-auth-posture.conf` sets `HOLLIS_AUTH_STATION=permissive`** on both the gateway and usage units (a dev posture dial from 2026-10-30). The
+   Substrate auth module reads `HOLLIS_AUTH_<APP>`, then `HOLLIS_AUTH`, only when the config sets no `auth.mode`; every Station manifest sets
+   `auth.mode: enforce`, and an explicit mode wins. So the variable is ignored by the new units, shown by
+   `TestAmbientAuthPostureDoesNotWeakenEnforcement` in `cmd/llm-gateway`, `cmd/usage-monitor` and `cmd/station-next`: with `HOLLIS_AUTH_STATION`,
+   the per-app form and `HOLLIS_AUTH=off` set, a request with no credential gets 401, a wrong key 401, a valid key 200, and `GET /api/me` reports
+   `"mode":"enforce"`. Mutation check: the same test with `auth.mode: permissive` in the override file fails on the mode. The old file stays in
+   place as part of the rollback (the old build reads it); nothing in the new drop-ins needs to unset it. (A variable named for the app `station`
+   would apply to the MCP host units too; the same test covers it.)
+2. **`10-neutral-cwd.conf` sets WorkingDirectory to the old state directory** (`<state home>/station/gateway` and `.../usage`). Nothing in the new
+   build resolves a path from the working directory: the database, signing key and secrets directory are absolute under the explicit data
+   directory (`LLM_GATEWAY_DATA_DIR`, `USAGE_MONITOR_DATA_DIR`), `SUBSTRATE_CONFIG` is an absolute path, and the catalog cache is under the home
+   cache directory. Every real-binary test now runs each command with an empty working directory (`unit.work`), and the posture tests assert it is
+   empty after serving. So the old working directory can stay; the new drop-ins need not set `WorkingDirectory`.
+
+## CI version stamp (driver notice, tools follow-up CW-20261112-0123)
+
+The shared build workflow creates `dist/` inside the checkout, which makes Go stamp `+dirty`. `/dist/` is now in `.gitignore` with a comment.

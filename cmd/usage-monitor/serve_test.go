@@ -292,3 +292,35 @@ func TestServedThroughTheTLSProxyName(t *testing.T) {
 		}
 	}
 }
+
+// The live units carry HOLLIS_AUTH_STATION=permissive (a dev posture dial added to the old build's units).
+// The unit's own auth.mode is enforce and the module reads the environment only when the config sets no
+// mode, so the variable, and its general and per-app forms, must change nothing: no credential, no entry.
+// The unit also runs from an empty working directory and must leave it empty.
+func TestAmbientAuthPostureDoesNotWeakenEnforcement(t *testing.T) {
+	u := newUnit(t, "")
+	u.env = append(u.env, "HOLLIS_AUTH_STATION=permissive", "HOLLIS_AUTH_USAGE_MONITOR=permissive", "HOLLIS_AUTH=off")
+	u.mustRun(ownerPassphrase+"\n", "identity", "setup", "--username", "owner")
+	reader := strings.TrimSpace(u.mustRunStdout("", "identity", "key", "create", "--name", "reader", "--scope", "usage-monitor.read", "--stdout"))
+	s := u.serve()
+	for _, tc := range []struct {
+		name, key string
+		want      int
+	}{
+		{"no credential", "", 401},
+		{"wrong credential", "not-a-key", 401},
+		{"valid credential (control: the server answers)", reader, 200},
+	} {
+		if got, _ := s.call(t, "GET", "/api/usage-monitor/v1/accounts", tc.key, "", nil); got != tc.want {
+			t.Errorf("%s: %d, want %d", tc.name, got, tc.want)
+		}
+	}
+	// The guard reports the mode it runs in: the configured one, whatever the environment says.
+	if code, body := s.call(t, "GET", "/api/me", reader, "", nil); code != 200 || !strings.Contains(body, `"mode":"enforce"`) {
+		t.Errorf("/api/me = %d %s, want mode enforce", code, body)
+	}
+	s.stop(t)
+	if left, _ := os.ReadDir(u.work); len(left) != 0 {
+		t.Errorf("the working directory is not empty after a run: %d entries", len(left))
+	}
+}

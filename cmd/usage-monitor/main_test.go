@@ -45,6 +45,7 @@ func TestMain(m *testing.M) {
 type unit struct {
 	t    *testing.T
 	dir  string
+	work string // the working directory of every run: empty, so nothing may depend on it
 	cfg  string
 	addr string
 	env  []string
@@ -61,9 +62,12 @@ func newUnit(t *testing.T, extraConfig string) *unit {
 	}
 	addr := ln.Addr().String()
 	_ = ln.Close()
-	u := &unit{t: t, dir: filepath.Join(tmp, "data"), cfg: filepath.Join(tmp, "override.yaml"), addr: addr}
+	u := &unit{t: t, work: filepath.Join(tmp, "cwd"), dir: filepath.Join(tmp, "data"), cfg: filepath.Join(tmp, "override.yaml"), addr: addr}
 	body := fmt.Sprintf("httphost: {addr: %q}\nidentity: {bcrypt_cost: 4}\n%s", addr, extraConfig)
 	if err := os.WriteFile(u.cfg, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(u.work, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	u.env = append(os.Environ(), "USAGE_MONITOR_DATA_DIR="+u.dir, "SUBSTRATE_CONFIG="+u.cfg)
@@ -73,6 +77,7 @@ func newUnit(t *testing.T, extraConfig string) *unit {
 func (u *unit) command(stdin string, args ...string) *exec.Cmd {
 	c := exec.Command(monitorBin, args...)
 	c.Env = u.env
+	c.Dir = u.work
 	if stdin != "" {
 		c.Stdin = strings.NewReader(stdin)
 	}

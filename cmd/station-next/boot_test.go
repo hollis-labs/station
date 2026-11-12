@@ -352,3 +352,18 @@ func keys(m map[string]any) []string {
 	}
 	return out
 }
+
+// The live units carry HOLLIS_AUTH_STATION=permissive (a dev posture dial added to the old build's units). The
+// manifest sets auth.mode enforce and the module reads the environment only when the config sets no mode, so the
+// variable and its general form must change nothing: an anonymous caller is refused on a mount and on the API.
+func TestAmbientAuthPostureDoesNotWeakenEnforcement(t *testing.T) {
+	t.Setenv("HOLLIS_AUTH_STATION", "permissive")
+	t.Setenv("HOLLIS_AUTH", "off")
+	base, stop := started(t)
+	defer stop()
+	if code, _ := mcp(t, base, "/echo", "", initialize); code != 401 {
+		t.Fatalf("anonymous /echo = %d, want 401", code)
+	}
+	anon := newSession(t, base)
+	anon.want(401, "GET", "/api/identity/keys", nil)
+}
