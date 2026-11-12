@@ -209,7 +209,7 @@ confirmed. The owner approves the loss window with the plan.
 5. **Temporary name.** The new service lives in `cmd/station-next` until the gateway and usage-monitor have their own
    binaries; then the old `cmd/station`, `platform/` and `plugins/` roles are removed and the directory is renamed.
 
-## Gateway store plan (ruled 2026-11-12; no store code written yet)
+## Gateway store plan (ruled 2026-11-12; written and verified below)
 
 - **gateway.db**: one-way copy into the new SQLite file (old file untouched, old unit stopped during the copy).
   Tables and current counts: `gateway_revisions` 10, `gateway_activations` 9, `gateway_usage` 0, plus `gateway_state`.
@@ -252,9 +252,11 @@ confirmed. The owner approves the loss window with the plan.
 
 ## Test database for the ledger proof
 
-The live ledger reports PostgreSQL 17.11 (driver, read-only). The throwaway database for the ledger tests uses
-`postgres:17` (the Substrate BOM's `ci.postgres_image`). Whether a container runtime is available on the worker is
-not yet checked; the existing llm-gateway tests read `STATION_TEST_PG_DSN` and skip without it.
+The live ledger reports PostgreSQL 17.11 (driver, read-only). The proof ran against a throwaway `postgres:17` container
+(17.11, the Substrate BOM's `ci.postgres_image`) on `127.0.0.1:55432` with trust authentication, removed afterwards.
+The tests read `STATION_TEST_PG_DSN` (a superuser URL for that container, for example
+`postgres://postgres@127.0.0.1:55432/postgres?sslmode=disable`) and skip without it. Each proof test makes its own
+database and role names and drops them.
 
 ## Ledger schema mode (from the code; the container run confirms it)
 
@@ -264,7 +266,8 @@ not yet checked; the existing llm-gateway tests read `STATION_TEST_PG_DSN` and s
   llm_ledger_schema`, reads the version and applies any pending migrations. A runtime login without CREATE on the
   schema is expected to fail at that `CREATE TABLE IF NOT EXISTS` (Postgres checks the schema privilege before the
   existence test) with `llm-gateway: ledger: schema table: ...`, so startup stops. Recorded here as expected;
-  the Postgres 17 container test records the real message.
+  the container run recorded the real message: `llm-gateway: ledger: schema table: ERROR: permission denied for schema
+  public (SQLSTATE 42501)`, and the schema versions were unchanged afterwards (`TestPGLiveRoleLayout`).
 - `verify` is read-only: it needs the `llm_ledger_schema` rows to be exactly v1..v3 and resolves the full `llm_calls`
   column list with `LIMIT 0`. A mismatch refuses to start and names `ledger-migrate`.
 - The code carries three ledger migrations (v1 create, v2 `conversation_id`, v3 `cost_bound`). Whether any is pending
@@ -272,6 +275,9 @@ not yet checked; the existing llm-gateway tests read `STATION_TEST_PG_DSN` and s
 - Case (a): runtime login can create/alter: `auto` works as today. Case (b), the live shape: runtime login cannot
   create, so production is effectively verify-only and the owner's migrator runs `ledger-migrate` (SET ROLE to the
   owner) before a new binary that needs a newer version.
+- `verify` refusals recorded (same test): with v3 missing and with a v4 row present the runtime login gets
+  `llm-gateway: ledger: schema does not match binary v3; run llm-gateway ledger-migrate with the matching binary and
+  migration identity`. The port carries three migrations: there is no v4 and no schema change.
 - Recommendation for the owner: set `schema_mode: verify` explicitly and keep the migrator credential out of the
   serve process, so a role change cannot turn into a startup failure. Not changed by this port.
 
@@ -338,7 +344,91 @@ only the new code (`./cmd/station-next/...`, `./internal/...`, 0 issues).
   the MCP host, and rename `cmd/station-next` to `cmd/station` (and `/station-next` in `.gitignore`).
 - Widen the CI lint step from `./cmd/station-next/... ./internal/...` to `./...` (the 55 findings above disappear with
   the old code).
+- Delete `internal/llmgateway/ledger_compat_test.go` (it imports `plugins/llm-gateway` and `platform`), `scripts/` mentions
+  of `station client`, and the old `api.example.yaml` / `usage-monitor.example.yaml` shapes.
+- Flip `relayWired` in `cmd/llm-gateway/serve.go` once the framework's raw-error opt-out is pinned (Gap 11) and move the
+  relay routes onto it; update the Gap 11 text and the evidence.
 - Rewrite `AGENTS.md` and the README (both still say "not released") and the fleet descriptors for all four units.
+
+## llm-gateway port: what is written and verified (cmd/llm-gateway, internal/llmgateway)
+
+**Shape.** `internal/llmgateway` is the old `plugins/llm-gateway` with no dependency on `platform`: `Start(ctx, host, cfg,
+opts)` returns routes and a `Close`; the host supplies the logger, secret resolution and a redaction scope. The relay, policy,
+budgets, catalog, ledger, reservations and capture code is carried over unchanged apart from lint fixes and the changes below.
+`cmd/llm-gateway` is the service: manifest (`app: llm-gateway`, modules httphost, secrets, auth, database, identity, cli),
+default listen address `127.0.0.1:18085` (the live gateway keeps 18082 until cutover), auth `enforce`, a loopback-only bind
+refused before anything listens, Host check (`internal/hostguard`), unit data directory from `LLM_GATEWAY_DATA_DIR` (database
+`llm-gateway.db`, signing key, secrets). The gateway configuration (providers, models, policy, budgets, ledger, catalog) is
+the active revision in the service database, as it was in the old managed mode; `serve` refuses to start without one.
+
+**Changed behaviour (deliberate).**
+- Client keys are issued by the identity module (scopes `llm-gateway.*` as before). `/clients` routes, `station client`
+  and the management credential scope are gone; a stored legacy `clients` field is kept in old revisions, ignored, and a
+  new document naming clients is refused with a message pointing at the identity module.
+- Management errors use the framework's flat `{code, message, details}` shape (`details.request_id`).
+- `ledger.sqlite.path` is refused: the SQLite ledger lives in the service database.
+- The relay routes are **not mounted** (`relayWired = false`, each route is marked `Raw`): see Gap 11. `serve` logs a warning
+  with the count. Until the framework has a per-route opt-out and Station pins it, the new binary serves the management API
+  and health only, and nothing may be cut over to it.
+- Shutdown: `shutdownGrace` 15 s (a stream that outlives it is cut) plus `closeTimeout` 10 s (ledger flush, catalog stop), so
+  the unit's stop timeout must exceed 25 s.
+- Not ported: Tether-JWT verification from the old `auth.jwt` block (the live config uses keys only), the old middleware
+  chain explanation (`station validate` printed it), inprocess transport and tool-level scopes (they belong to the MCP host,
+  not the gateway), and `gateway-store import` (it read an `api.yaml`; use `stage` with a document, or `migrate-from`).
+- Known default outside the data directory: the catalog's cache directory defaults to `~/.cache/go-modelsdev`
+  (a library default, shared with other tools). Tests redirect `HOME`/`XDG_*`; a unit may set `catalog.cache_dir`.
+
+**Old to new, commands.**
+
+| Old | New |
+|---|---|
+| `station serve -api-only -api-config api.yaml -gateway-db gateway.db` | `llm-gateway serve` with `SUBSTRATE_CONFIG` and `LLM_GATEWAY_DATA_DIR` |
+| `station validate -api-only -api-config ... -gateway-db ...` | `llm-gateway validate` (assembles the active revision without listening; needs the existing database) |
+| `station gateway-store stage\|show\|status\|history\|activate -db PATH ...` | `llm-gateway gateway-store stage\|show\|status\|history\|activate` (flags `--input --expected --actor --revision --output --before`) |
+| `station gateway-store import -api-config` | dropped; `gateway-store migrate-from --old-db COPY` copies a whole old `gateway.db` |
+| `station ledger-migrate -dsn-ref ... -owner-role ...` | `llm-gateway ledger-migrate --dsn-ref ... --owner-role ...` (same flags) |
+| `station secret set\|check` | `llm-gateway secret set\|check` (stdin only) |
+| `station client issue\|revoke\|list` | `llm-gateway identity key create` offline, `/api/identity/keys` online |
+
+**Copying the old gateway database.** `gateway-store migrate-from --old-db COPY` copies an online-backup copy of the old
+`gateway.db` into an empty service database in one transaction: revisions verbatim (ids, document text, sha256), the state
+row, the activation audit and the usage rows. It refuses a file that is not an old gateway database (application id and
+user_version), refuses a destination that already has rows, checks the counts and recomputes every revision checksum before
+it commits, and prints the report. A service refuses to open an old `gateway.db` as its own database
+(`RefuseLegacyDatabase`, also when the old file's header change is still in its `-wal`). Tests: `legacy_migrate_test.go`,
+`cmd/llm-gateway/store_test.go`.
+
+**Postgres ledger proof (container, 17.11).** `TestPGLiveRoleLayout`, `TestLedgerMigrateCommand` and
+`TestPGInsertMatchesOldGatewayColumnForColumn` ran against a throwaway Postgres 17.11 with the live role layout (owner
+NOLOGIN; migrator LOGIN, NOINHERIT, member of the owner WITH SET; runtime group NOLOGIN; runtime login without CREATE):
+- `ledger-migrate` as the migrator login (SET ROLE to the owner) took an empty schema to v1, v2, v3; the objects belong to
+  the owner role; a rerun is a no-op; the migrator cannot create objects without SET ROLE. The real binary did the same with
+  the migration DSN read from the unit's secrets store.
+- The runtime login holds INSERT, SELECT, UPDATE on `llm_calls` and SELECT on `llm_ledger_schema`, and nothing more
+  (no DELETE, no CREATE, no ALTER).
+- The ported gateway started in `verify` mode as the runtime login, served a request and wrote its `llm_calls` row.
+- `verify` refuses with a missing v3 and with a v4 row (message above); `auto` as the runtime login fails with
+  `permission denied for schema public` and changes nothing. So in the live shape (case b) the unit only works in verify mode,
+  and the migrator runs `ledger-migrate` before a binary that needs a newer version. Not verified: which of the two the
+  live config is; that needs the live role privileges (read-only, via the driver).
+- No v4: the port carries the three migrations of the old code. `store_pg.go` differs from the old file in three lines:
+  two operator messages (they name `llm-gateway ledger-migrate`) and a lint fix on a `defer`.
+- Old versus new insert: the same OpenAI and Anthropic requests through the old plugin and through the port wrote the same
+  `llm_calls` values in the 18 columns compared (all but id, recorded_at, request_id, latency_ms); the test fails when one
+  value is changed (checked).
+
+**Store concurrency.** The management store and the SQLite ledger use `Reader()` for reads and `WriteTx` for writes (callbacks
+only read, decide and write, so a restart after contention is safe); no statement runs inside an open cursor.
+`TestSQLiteLedgerOneReadConnection` runs four writers and four readers with `ReadConns: 1`; the package's `go test -race`
+passed six runs in a row.
+
+**What is verified, by test.** The real binary: offline `identity setup` and `identity key create`, `gateway-store stage` and
+`activate`, `validate`, `serve` on a loopback port, a read (`/status`: running revision 1) and a write (`PUT /config` with the
+precondition stages revision 2, read back through `/models?revision=2`) through the management API; refused: no key (401),
+an unknown key (401), a key without the scope (403 `scope_required`), a foreign Host (403), the unmounted relay route and the
+removed clients route (403 `route_not_mapped`); SIGTERM exits 0; no credential in the log. Binding to 0.0.0.0, `[::]`,
+`:0`, a documentation address and a tailnet address is refused before listening (the check was removed once and the
+test failed). The read-only commands create nothing under an empty HOME (positive control: `secret set`).
 
 ## Pin d453ac8: what Station adopts and what it does not
 

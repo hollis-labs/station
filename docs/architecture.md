@@ -123,7 +123,24 @@ starts). The above is by reading.
 
 ## 7. Target layout, scopes, config keys, dropped features
 
-Deliberately empty until decisions 2, 3 and 5 are made.
+Layout (module `github.com/hollis-labs/station`, one Go module, three binaries):
+
+| Path | What |
+|---|---|
+| `cmd/station-next` (becomes `cmd/station`) | MCP host: avatar-station and design-station are two units of this binary |
+| `cmd/llm-gateway` | the LLM gateway service (section 11) |
+| `cmd/usage-monitor` | usage monitor (not written yet) |
+| `internal/appboot`, `internal/appdirs`, `internal/appcmd` | shared boot hook and command plan, per-app data directory, shared `secret` command |
+| `internal/host`, `internal/settings` | the MCP engine inside a Substrate service |
+| `internal/llmgateway` | gateway package: relay, policy, budgets, catalog, ledger, management store |
+| `internal/hostguard` | Basalisk's Host/proxy-header guard (until the framework has one) and the loopback bind rule |
+
+Scopes: MCP host `station.<logical-server-id>`; gateway `llm-gateway.chat`, `.embed`, `.decide`, `.models.read`, `.usage.read`,
+`.catalog.write`, `.management.read|write|activate`; usage monitor unchanged. Config keys per unit are in
+`docs/conversion-notes.md` (env, flags, paths). Dropped: client-key registry and per-server `bearer_tokens`, `/clients`
+management routes and `station client`, `ledger.sqlite.path`, Tether-JWT verification (`auth.jwt`), `serve.stdio` (refused),
+inprocess transport and tool-level scopes (not used by any live unit; porting them means carrying `plugin_policy.go` and a
+tool filter on the MCP mount).
 
 ## 8. Test and evidence plan for the MCP-host port (in order of risk)
 
@@ -172,6 +189,26 @@ runs under filesystem trust is a program-wide question with the owner and is not
 | 7. inprocess transport | not done | the clock plugin's initialization policy (`plugin_policy.go`) is not ported; the live units do not use it |
 | 8. Tool-level scopes / per-caller tool filtering | not done | not used by the live units |
 | 9. Real binary on a throwaway directory | done | see the mail of 2026-11-12 13:02Z and `TestRealBinarySIGTERMWithCallInFlight` |
+
+## 11. The gateway service (cmd/llm-gateway)
+
+```
+client (key from identity) -> Host check -> session/bearer -> request id + x-api-key bridge -> framework guard (scope table)
+  -> management routes (flat errors)      -> internal/llmgateway.ManagementStore -> service SQLite (database module)
+  -> relay routes (Raw, NOT MOUNTED yet)  -> Gateway -> upstream providers; ledger: memory | SQLite (service DB) | Postgres (pgx, app-owned)
+```
+
+- Configuration is data: the active revision in `gateway_revisions` (immutable, sha256-checked), selected through
+  `gateway_state`/`gateway_activations`; staged and activated offline (`gateway-store`) or through the management API.
+- Stores: one goose schema (`internal/llmgateway/migrations/sqlite`) on `database.From(app)`, which has one write connection:
+  reads through `Reader()`, writes through `WriteTx` with re-runnable callbacks. The Postgres ledger is unchanged (three code
+  migrations, advisory lock, `auto` or `verify`) and is administered with `llm-gateway ledger-migrate` through SET ROLE.
+- Loopback only by Station's rule (`RequireLoopbackBind`), before anything listens. The gateway is reached from other
+  machines through a local TLS proxy listed in `llm-gateway.allowed_hosts`; reaching it directly from another host would be an
+  owner decision and a change to this rule.
+- Relay routes: the framework rewrites OpenAI-shaped error bodies into its flat shape (Gap 11), so they stay unmounted until
+  an opt-out exists; the path question (they live under `/api/llm-gateway`, where mounts are refused) is in Gap 11 too.
+- Shutdown: drain HTTP (15 s) then close the gateway (10 s); a unit stop timeout above 25 s.
 
 ## Bind rule
 
