@@ -1,0 +1,23 @@
+# Station (the MCP host) on Substrate. The manifest is the shell: modules and config.
+# Secure by default: the guard enforces and the host is its own identity provider.
+# Temporary directory name: this replaces cmd/station when the llm-gateway and
+# usage-monitor have their own binaries (see docs/conversion-notes.md).
+app: station
+variant: service
+profiles: [minimal]
+modules:
+  add: [httphost, secrets, auth, database, identity, cli]
+config:
+  logging: { level: info, format: text }
+  httphost: { addr: "127.0.0.1:18084" }  # a port no live unit holds; every unit sets its own port in its SUBSTRATE_CONFIG file
+  # Relative paths here are resolved against the data directory (STATION_DATA_DIR or the XDG
+  # data home) by the AfterConfig hook, after the SUBSTRATE_CONFIG override is applied.
+  database:
+    sqlite: { path: station.db }
+  auth: { mode: enforce }
+  identity: { key_file: identity-signing.key }
+  secrets: { state_dir: secrets }
+  # The app's own block. logical_servers has no default: each unit lists its servers in its
+  # SUBSTRATE_CONFIG file (the override deep-merges, so only what differs is written there).
+  station:
+    allowed_hosts: []

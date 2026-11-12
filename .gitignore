@@ -1,5 +1,6 @@
 # Go build artifacts
 /station
+/station-next
 /bin/
 *.exe
 *.exe~
