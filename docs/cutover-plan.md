@@ -71,7 +71,7 @@ migrator login; versions 1 to 3 are applied (verify-only). A legacy login `stati
 - **New data directories, new configuration files, new link paths.** `~/.local/share/{llm-gateway,usage-monitor,avatar-station,design-station}`,
   `~/.config/station/{gateway,usage}/substrate.yaml` and `~/.config/station/{avatar,design}-station.substrate.yaml`, and
   `~/.local/libexec/station-gateway/{llm-gateway,usage-monitor}`. The old links, old `20-` drop-ins and the old release stay; the new
-  drop-ins are `30-*-exec.conf` and sort after the old one.
+  drop-ins are `30-*-exec.conf` and sort after the old one. The two MCP-host units have no drop-in directory today, so the `station` descriptor's own `20-fleet-exec.conf` is new for them (dry run 2026-11-12); their rollback is removing it and restoring `<name>.pre-fleet-install`. The installer targets are the two in `deploy/station.yaml` (avatar and design); `--target` takes the id written there.
 - **No open setup window.** `POST /api/setup` is refused (403); the owner and keys are created offline **before** a unit starts. The
   first check after start is that `GET /api/setup` answers `{"setup_required":false}`.
 - **Never print a secret.** Keys go to mode-0600 files with `--out`; passwords are typed at a prompt; the keyring copy is a pipe.
