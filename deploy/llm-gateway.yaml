@@ -1,0 +1,28 @@
+schema: fleet-deploy/v1
+app: llm-gateway
+repo: hollis-labs/station
+artifact: {name: "llm-gateway-{sha12}", tarball: "llm-gateway_{version}_{os}_{arch}.tar.gz", sums: SHA256SUMS}
+targets:
+  - id: agent-os-llm-gateway
+    when: {os: linux, arch: amd64}
+    hosts: [agent-os]
+    binary: llm-gateway
+    install_root: ~/.local/share/fleet/releases/llm-gateway
+    symlinks:
+      - path: ~/.local/libexec/station-gateway/station-llm-gateway
+    unit_dropins:
+      - unit: com.hollis-labs.cerberus.station.station-llm-gateway.service
+        name: 20-fleet-exec.conf
+        content: |
+          [Service]
+          ExecStart=
+          ExecStart="%h/.local/libexec/station-gateway/station-llm-gateway" "serve"
+          Environment=SUBSTRATE_CONFIG=%h/.config/station/gateway/substrate.yaml
+          Environment=LLM_GATEWAY_DATA_DIR=%h/.local/share/llm-gateway
+          TimeoutStopSec=40
+    preflight:
+      - {kind: sqlite_backup, db: ~/.local/state/station/gateway/gateway.db, dest: "{backup_dir}/gateway.pre-{version}.db"}   # backups must be 0600
+    restart:
+      - {via: systemd-user, unit: com.hollis-labs.cerberus.station.station-llm-gateway.service}
+    health:
+      - {url: "http://127.0.0.1:18082/healthz", expect_status: [200], timeout: 30s}

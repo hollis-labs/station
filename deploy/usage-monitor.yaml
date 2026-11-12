@@ -1,0 +1,28 @@
+schema: fleet-deploy/v1
+app: usage-monitor
+repo: hollis-labs/station
+artifact: {name: "usage-monitor-{sha12}", tarball: "usage-monitor_{version}_{os}_{arch}.tar.gz", sums: SHA256SUMS}
+targets:
+  - id: agent-os-usage-monitor
+    when: {os: linux, arch: amd64}
+    hosts: [agent-os]
+    binary: usage-monitor
+    install_root: ~/.local/share/fleet/releases/usage-monitor
+    symlinks:
+      - path: ~/.local/libexec/station-gateway/station-usage-monitor
+    unit_dropins:
+      - unit: com.hollis-labs.cerberus.station.station-usage-monitor.service
+        name: 20-fleet-exec.conf
+        content: |
+          [Service]
+          ExecStart=
+          ExecStart="%h/.local/libexec/station-gateway/station-usage-monitor" "serve"
+          Environment=SUBSTRATE_CONFIG=%h/.config/station/usage/substrate.yaml
+          Environment=USAGE_MONITOR_DATA_DIR=%h/.local/share/usage-monitor
+          TimeoutStopSec=35
+    preflight:
+      - {kind: sqlite_backup, db: ~/.local/state/station/usage/usage.db, dest: "{backup_dir}/usage.pre-{version}.db"}   # backups must be 0600
+    restart:
+      - {via: systemd-user, unit: com.hollis-labs.cerberus.station.station-usage-monitor.service}
+    health:
+      - {url: "http://127.0.0.1:18083/healthz", expect_status: [200], timeout: 30s}

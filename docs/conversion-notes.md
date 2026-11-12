@@ -710,7 +710,22 @@ venv entry point and the tripo wrapper, may resolve paths from it).
 
 `.github/workflows/build.yml` calls the tools reusable workflow `go-app-build.yml` with one `main_pkg`, one `binary` and one `extra_files` set,
 and the tarball's `deploy.yaml` carries `app: station`. Station now has three binaries (`cmd/station`, `cmd/llm-gateway`, `cmd/usage-monitor`) and
-four units. Proposed (awaiting the driver's ruling, option A): three calls of the reusable workflow (apps `station`, `llm-gateway`,
+four units. Ruled option A (driver 2026-11-12): three calls of the reusable workflow (apps `station`, `llm-gateway`,
 `usage-monitor`), each with `ui_cmd: cp deploy/<app>.yaml deploy.yaml` and `extra_files: deploy.yaml`, so each artifact carries its own
 descriptor; the two MCP-host units are two targets of the `station` descriptor. Nothing outside this repository changes. The live build and
 `deploy.yaml` stay untouched until the ruling.
+
+**Built on the branch (Gap 12, option A).** `.github/workflows/build.yml` has three calls (`station` from `./cmd/station-next`, `llm-gateway`,
+`usage-monitor`; tests run in each call), each copying `deploy/<app>.yaml` over `deploy.yaml` with a comment naming the follow-up (a descriptor
+input and multi-binary support in tools, filed by the driver). The root `deploy.yaml` still describes the old build and is replaced in the cutover
+commit; the CI copy means the branch's artifacts never carry it. Descriptor details: `deploy/station.yaml` holds two targets (avatar-station,
+design-station: separate drop-ins, config files and data directories `~/.local/share/avatar-station` and `~/.local/share/design-station`, so the two
+units do not share an identity or database; `TimeoutStopSec=30`, no `KillMode`); `deploy/llm-gateway.yaml` and `deploy/usage-monitor.yaml` carry the
+drop-ins above and the old-database online-backup preflights. `scan-public.allow` gained one line, `deploy/*.yaml`, for the same fleet inventory
+alias already allowlisted for `deploy.yaml` (owner to confirm).
+
+**Open question for the installer (driver answers with dry runs before any cutover).** Today the app `station` owns the links
+`~/.local/libexec/station-gateway/station-llm-gateway` and `.../station-usage-monitor` (into the `station` release directory). With three apps,
+`llm-gateway` and `usage-monitor` claim those same paths. What does the installer do when a new app first claims a path that is a link owned by
+another app, and what does `fleet-install rollback station` do afterwards? Not assumed. Fallback if the answer is bad: the new apps use new link
+paths (for example `.../station-gateway/llm-gateway`), the units' drop-ins point at them, and the old links stay as the rollback.
