@@ -1,16 +1,16 @@
 module github.com/hollis-labs/station
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/hollis-labs/libs/app/app-host v0.1.0
 	github.com/hollis-labs/libs/core/util v0.6.0
 	github.com/hollis-labs/libs/llm/core v0.4.0
-	github.com/hollis-labs/libs/security/auth v0.3.0
+	github.com/hollis-labs/libs/security/auth v0.3.1
 	github.com/hollis-labs/libs/security/policy v0.1.0
 	github.com/hollis-labs/libs/security/redact v0.2.0
 	github.com/hollis-labs/libs/security/secrets v0.1.0
-	github.com/hollis-labs/substrate v0.1.1-0.20261112162132-d453ac897397
+	github.com/hollis-labs/substrate v0.1.1-0.20261112164520-da9f59bb59b7
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/spf13/cobra v1.10.2
