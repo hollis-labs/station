@@ -28,6 +28,8 @@ const (
 	// bootstrap or the migration already created, so a mistyped data directory fails instead of
 	// becoming a new empty one.
 	ModeServe
+	// ModeDir may create the data directory but no database (`secret set`).
+	ModeDir
 	// ModeCreate may create the data directory and the database: the offline bootstrap and the
 	// commands that copy or stage data into a new database.
 	ModeCreate
@@ -36,7 +38,7 @@ const (
 // AfterConfig is the boot hook that resolves run-time paths. It runs once, right after the config
 // module applied the SUBSTRATE_CONFIG override, so an operator's absolute path wins and a relative
 // default from the manifest is placed in the unit's data directory (<APP>_DATA_DIR, else the XDG
-// data home). Only ModeCreate creates that directory (0700). With a database module, every other
+// data home). ModeDir and ModeCreate create that directory (0700), and only ModeCreate the database file. With a database module, every other
 // mode requires the database file to exist, and this check runs before any module starts, so a
 // wrong data directory is refused before the secrets or identity module can create anything in it.
 func AfterConfig(getenv func(string) string, mode Mode, withDatabase bool) boot.Hook {
@@ -45,10 +47,14 @@ func AfterConfig(getenv func(string) string, mode Mode, withDatabase bool) boot.
 		if err != nil {
 			return err
 		}
-		if mode == ModeCreate {
-			if err = dirs.Prepare(); err != nil {
-				return fmt.Errorf("prepare the data directory %s: %w", dirs.Data, err)
-			}
+		switch mode {
+		case ModeCreate:
+			err = dirs.Prepare()
+		case ModeDir:
+			err = dirs.PrepareDir()
+		}
+		if err != nil {
+			return fmt.Errorf("prepare the data directory %s: %w", dirs.Data, err)
 		}
 		inData := func(p, fallback string) string {
 			if p == "" {
@@ -79,7 +85,7 @@ func AfterConfig(getenv func(string) string, mode Mode, withDatabase bool) boot.
 		set("database", "path", appdirs.DatabaseFile(app.Name), "sqlite")
 		set("identity", "key_file", appdirs.SigningKeyFile)
 		set("secrets", "state_dir", appdirs.SecretsDir)
-		if withDatabase && mode != ModeCreate {
+		if withDatabase && mode != ModeCreate && mode != ModeDir {
 			path := DatabasePath(app)
 			if _, err := os.Stat(path); err != nil {
 				return fmt.Errorf("there is no database at %s: run the offline setup (identity setup) or the migration (migrate-from) first; this command does not create one", path)
@@ -221,7 +227,7 @@ func (c Cmd) fits(rest []string) bool {
 func builtin(all []string) map[string]Cmd {
 	return map[string]Cmd{
 		"serve":        {Modules: all, Mode: ModeServe},
-		"secret set":   {Modules: Pick(all, WithSecrets), Mode: ModeCreate, Args: 1},
+		"secret set":   {Modules: Pick(all, WithSecrets), Mode: ModeDir, Args: 1},
 		"secret check": {Modules: Pick(all, WithSecrets), Mode: ModeRead, Args: 1},
 		"identity setup": {Modules: Pick(all, WithIdentity), Mode: ModeCreate,
 			Flags: []string{"username", "display-name"}, Required: []string{"username"}},

@@ -58,13 +58,19 @@ func (d Dirs) SigningKey() string { return filepath.Join(d.Data, SigningKeyFile)
 // Secrets is the managed file store for credentials.
 func (d Dirs) Secrets() string { return filepath.Join(d.Data, SecretsDir) }
 
-// Prepare creates the data directory (0700) and the database file (0600) when missing and
-// tightens both when they exist. The signing key and the secrets store create themselves private.
-func (d Dirs) Prepare() error {
+// PrepareDir creates the data directory (0700) and tightens it when it exists. It creates no
+// database: a command that only stores a secret must not leave an empty one behind.
+func (d Dirs) PrepareDir() error {
 	if err := os.MkdirAll(d.Data, 0o700); err != nil {
 		return err
 	}
-	if err := os.Chmod(d.Data, 0o700); err != nil { //nolint:gosec // 0700 on a directory is the point: owner-only
+	return os.Chmod(d.Data, 0o700) //nolint:gosec // 0700 on a directory is the point: owner-only
+}
+
+// Prepare creates the data directory (0700) and the database file (0600) when missing and
+// tightens both when they exist. The signing key and the secrets store create themselves private.
+func (d Dirs) Prepare() error {
+	if err := d.PrepareDir(); err != nil {
 		return err
 	}
 	f, err := os.OpenFile(d.Database(), os.O_CREATE|os.O_RDWR, 0o600)

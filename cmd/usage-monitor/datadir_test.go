@@ -67,7 +67,7 @@ func TestPlan(t *testing.T) {
 		{[]string{"identity", "key", "create", "--scope", "s", "--stdout"}, ro, appboot.ModeRead},
 		{[]string{"identity"}, ro, appboot.ModeRead},
 		{[]string{"secret", "check", "file://a/b"}, pick(appboot.WithSecrets), appboot.ModeRead},
-		{[]string{"secret", "set", "file://a/b"}, pick(appboot.WithSecrets), appboot.ModeCreate},
+		{[]string{"secret", "set", "file://a/b"}, pick(appboot.WithSecrets), appboot.ModeDir},
 		{[]string{"secret", "set"}, ro, appboot.ModeRead},
 		{[]string{"secret", "set", "a", "b"}, ro, appboot.ModeRead},
 		{[]string{"validate"}, pick(appboot.WithDatabaseSecrets), appboot.ModeRead},
@@ -145,6 +145,11 @@ func TestReadOnlyCommandsCreateNothing(t *testing.T) {
 	}
 	if len(entries(home)) == 0 {
 		t.Fatal("control: secret set wrote nothing, so the emptiness check proves nothing")
+	}
+	for _, e := range entries(home) {
+		if strings.HasSuffix(e, ".db") {
+			t.Fatalf("secret set left a database behind: %s", e)
+		}
 	}
 }
 
