@@ -513,3 +513,17 @@ Two things the replacement does not cover, for the owner: identity has no offlin
 needs an owner session over HTTP), and a revision no longer records who held which key, so the audit of key changes
 moves from the revision history to identity's own records. Live callers of these routes are not known from the
 repository (the `station-operator` client holds `llm-gateway.*` and could call them); the driver is asked who does.
+
+## Live facts received from the driver (2026-11-12)
+
+- **Ledger.** The live runtime login cannot create or alter anything in the ledger database; schema changes need the
+  separate migrator login; versions 1 to 3 are applied. The live case is therefore verify-only for the runtime login (the
+  proof's steps 3 and 5). There is no version 4, so the cutover does not need the migrator's credential (nobody has found
+  where its reference was recorded). The legacy login named `station` has no privileges on the ledger tables and is removed
+  after cutover.
+- **Callers.** The live gateway listens on 127.0.0.1:18082, auth mode enforce with a `keys_file` and no `jwt` block, so every
+  caller presents a key from that file; no Tether-issued JWT. `auth.jwt` is not ported. The keys file is one YAML list of
+  `{id, sha256, scopes}`; each entry becomes a new identity API key with `llm-gateway.*` scopes in the re-provisioning list
+  (names and holders pending from the driver).
+- **Relay gate.** The relay routes stay unreachable in every build (`relayWired` false) until a test proves an upstream
+  OpenAI error arrives byte for byte and a framework refusal arrives flat.
