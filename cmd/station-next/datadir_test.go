@@ -132,6 +132,16 @@ func TestReadOnlyCommandsCreateNothing(t *testing.T) {
 			t.Errorf("%v created %v", args, got)
 		}
 	}
+	for _, args := range [][]string{{"identity", "setup", "--help"}, {"identity", "key", "create", "--help"}} {
+		home := t.TempDir()
+		out, err := run(home, "", args...)
+		if err != nil || !strings.Contains(out, "--username") && !strings.Contains(out, "--scope") {
+			t.Errorf("%v: err=%v\n%s", args, err, out)
+		}
+		if got := entries(home); len(got) != 0 {
+			t.Errorf("%v created %v", args, got)
+		}
+	}
 	for _, args := range [][]string{nil, {"serve", "--help=true"}} {
 		home := t.TempDir()
 		if out, err := run(home, "", args...); err != nil {

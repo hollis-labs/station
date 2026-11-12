@@ -51,5 +51,8 @@ func (g *gateway) root(ctx context.Context, args []string) *cobra.Command {
 	rootCmd := cli.Root(g.app)
 	rootCmd.SetArgs(args) // the same words plan() looked at
 	rootCmd.AddCommand(g.serveCmd(ctx), g.validateCmd(), g.storeCmd(), g.ledgerMigrateCmd(), appcmd.Secret(g.app))
+	if help := appcmd.IdentityHelp(g.app); help != nil {
+		rootCmd.AddCommand(help)
+	}
 	return rootCmd
 }

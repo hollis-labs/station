@@ -182,3 +182,34 @@ func TestRootHasNoValueFlags(t *testing.T) {
 	check(root.Flags())
 	check(root.PersistentFlags())
 }
+
+// `identity setup --help` and `identity key create --help` answer with the real flags even though
+// help starts no module (the identity commands exist only when the identity module started), and
+// create nothing.
+func TestIdentityHelpIsAvailableWithoutStartingAnything(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"identity", "setup", "--help"}, []string{"--username", "--display-name"}},
+		{[]string{"identity", "key", "create", "--help"}, []string{"--name", "--scope", "--out", "--stdout", "--ttl"}},
+		{[]string{"identity", "--help"}, []string{"setup", "key"}},
+	} {
+		home := t.TempDir()
+		c := newUnit(t, "").command("", tc.args...)
+		c.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "XDG_DATA_HOME=" + home + "/data",
+			"XDG_STATE_HOME=" + home + "/state", "XDG_CONFIG_HOME=" + home + "/config"}
+		out, err := c.CombinedOutput()
+		if err != nil {
+			t.Errorf("%v: %v\n%s", tc.args, err, out)
+		}
+		for _, w := range tc.want {
+			if !strings.Contains(string(out), w) {
+				t.Errorf("%v: help does not mention %s:\n%s", tc.args, w, out)
+			}
+		}
+		if ents, _ := os.ReadDir(home); len(ents) != 0 {
+			t.Errorf("%v created %d entries in HOME", tc.args, len(ents))
+		}
+	}
+}

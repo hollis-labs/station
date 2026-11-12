@@ -49,5 +49,8 @@ func (s *station) root(ctx context.Context, args []string) *cobra.Command {
 	rootCmd := cli.Root(s.app)
 	rootCmd.SetArgs(args) // the same words plan() looked at
 	rootCmd.AddCommand(s.serveCmd(ctx), s.listCmd(), s.validateCmd(), appcmd.Secret(s.app))
+	if help := appcmd.IdentityHelp(s.app); help != nil {
+		rootCmd.AddCommand(help)
+	}
 	return rootCmd
 }

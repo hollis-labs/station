@@ -51,5 +51,8 @@ func (m *monitor) root(ctx context.Context, args []string) *cobra.Command {
 	rootCmd := cli.Root(m.app)
 	rootCmd.SetArgs(args) // the same words plan() looked at
 	rootCmd.AddCommand(m.serveCmd(ctx), m.validateCmd(), m.migrateCmd(), appcmd.Secret(m.app))
+	if help := appcmd.IdentityHelp(m.app); help != nil {
+		rootCmd.AddCommand(help)
+	}
 	return rootCmd
 }
