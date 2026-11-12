@@ -282,6 +282,12 @@ func (g *Gateway) relay(w http.ResponseWriter, r *http.Request, d Dialect, op Op
 		}
 		return
 	}
+	// Policy, budget and price are decided on the model the gateway parsed; an upstream may honour
+	// another copy of a repeated key, so a body that repeats one is refused before any of them.
+	if hasDuplicateKey(body) {
+		g.refuse(w, d, caller, requestID, "", http.StatusBadRequest, "invalid_request", "the request body repeats a top-level key")
+		return
+	}
 	meta, err := d.Inspect(op, body)
 	if err != nil {
 		g.refuse(w, d, caller, requestID, "", http.StatusBadRequest, "invalid_request", err.Error())
@@ -999,4 +1005,35 @@ func (g *Gateway) checkBudget(w http.ResponseWriter, r *http.Request, d Dialect,
 		return status, false
 	}
 	return status, true
+}
+
+// hasDuplicateKey reports whether the top-level JSON object repeats a key, compared without regard
+// to case (Go decodes "Model" into the same field as "model", an upstream may not). A body that is
+// not a JSON object, or is malformed, returns false: the dialect's own parse reports that.
+func hasDuplicateKey(body []byte) bool {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
+		return false
+	}
+	seen := map[string]bool{}
+	for dec.More() {
+		t, err := dec.Token()
+		if err != nil {
+			return false
+		}
+		key, ok := t.(string)
+		if !ok {
+			return false
+		}
+		key = strings.ToLower(key)
+		if seen[key] {
+			return true
+		}
+		seen[key] = true
+		var skip json.RawMessage
+		if err := dec.Decode(&skip); err != nil {
+			return false
+		}
+	}
+	return false
 }
