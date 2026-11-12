@@ -694,3 +694,23 @@ unit_dropins:
 - `restart` keeps its order (usage-monitor first, then the gateway), and `health` keeps the two `/healthz` URLs on 18083 and 18082.
 - Not written yet: the two MCP-host targets (avatar-station on 8097, design-station on 8110). The live descriptor has no entry for
   them, so their unit names and who supplies their descriptor are needed from the driver.
+
+## The two MCP-host units as they run today (driver, read-only look, 2026-11-12)
+
+Both are Cerberus-rendered user units: `com.hollis-labs.cerberus.avatar-station.service` (ExecStart `<libexec>/station/station serve -config
+<config>/station/avatar-station.yaml -http-addr 127.0.0.1:8097`, WorkingDirectory `<data home>/avatars`) and
+`com.hollis-labs.cerberus.design-station.service` (`<libexec>/design-station/station serve -config .../design-station.yaml -http-addr
+127.0.0.1:8110`, WorkingDirectory `<data home>/design-suite`). `Restart=always`, `RestartSec=5`, Environment PATH only, no drop-ins, no
+`TimeoutStopSec` or `KillMode`. The binaries are plain files (two different builds, 15 October and 5 November), not installer links; the unit
+files are Cerberus's and are never edited, a drop-in directory beside them is the installer's. The first deploy keeps each old file as
+`<name>.pre-fleet-install`; that is the rollback. WorkingDirectory stays unless the new build needs otherwise (the logical servers, a Python
+venv entry point and the tripo wrapper, may resolve paths from it).
+
+## Gap 12: the CI build makes one binary and one descriptor per app
+
+`.github/workflows/build.yml` calls the tools reusable workflow `go-app-build.yml` with one `main_pkg`, one `binary` and one `extra_files` set,
+and the tarball's `deploy.yaml` carries `app: station`. Station now has three binaries (`cmd/station`, `cmd/llm-gateway`, `cmd/usage-monitor`) and
+four units. Proposed (awaiting the driver's ruling, option A): three calls of the reusable workflow (apps `station`, `llm-gateway`,
+`usage-monitor`), each with `ui_cmd: cp deploy/<app>.yaml deploy.yaml` and `extra_files: deploy.yaml`, so each artifact carries its own
+descriptor; the two MCP-host units are two targets of the `station` descriptor. Nothing outside this repository changes. The live build and
+`deploy.yaml` stay untouched until the ruling.
