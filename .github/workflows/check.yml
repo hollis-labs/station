@@ -33,6 +33,6 @@ jobs:
         run: go run github.com/hollis-labs/substrate/cmd/substrate pins check --app .
       - name: Public hygiene (tree)
         # The history gate (--ref HEAD) returns after the program-wide history pass.
-        run: python3 scripts/scan-public --tree
+        run: go run github.com/hollis-labs/substrate/cmd/substrate scan-public --tree
       - name: Tests with real Station and plugin children
         run: go test -race -count=1 -timeout 4m ./...
