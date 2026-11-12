@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -48,12 +49,41 @@ func TestFirstRunScript(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(u.dir, "llm-gateway.db")); err != nil {
 		t.Fatalf("the database is not in the explicit data directory: %v", err)
 	}
-	// A second run changes nothing: the owner exists, so setup refuses and no key file appears.
-	before, _ := os.ReadDir(keys)
-	if out, err := run(); err == nil {
-		t.Fatalf("second run succeeded:\n%s", out)
+	// A second run changes nothing and succeeds: the owner and every key file are skipped, said so,
+	// and the key files are byte for byte what they were.
+	snapshot := func() map[string]string {
+		m := map[string]string{}
+		ents, _ := os.ReadDir(keys)
+		for _, e := range ents {
+			b, _ := os.ReadFile(filepath.Join(keys, e.Name()))
+			m[e.Name()] = string(b)
+		}
+		return m
 	}
-	if after, _ := os.ReadDir(keys); len(before) != len(after) {
+	before := snapshot()
+	out, err = run()
+	if err != nil || !strings.Contains(out, "owner already exists, skipped") || !strings.Contains(out, "already exists, skipped") || strings.Contains(out, "written to") {
+		t.Fatalf("second run: %v\n%s", err, out)
+	}
+	if after := snapshot(); !reflect.DeepEqual(before, after) {
 		t.Fatal("the second run changed the key files")
+	}
+	// After a partial failure (one key file missing) only that key is made, and the others are kept.
+	var lost string
+	for name := range before {
+		lost = name
+		break
+	}
+	if err = os.Remove(filepath.Join(keys, lost)); err != nil {
+		t.Fatal(err)
+	}
+	out, err = run()
+	if err != nil || strings.Count(out, "written to") != 1 || !strings.Contains(out, lost) {
+		t.Fatalf("recovery run: %v\n%s", err, out)
+	}
+	for name, body := range snapshot() {
+		if name != lost && body != before[name] {
+			t.Fatalf("%s was rewritten", name)
+		}
 	}
 }
