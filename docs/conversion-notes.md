@@ -653,3 +653,44 @@ that change at cutover) and anything else the docs name.
 
 Substrate main da9f59b: the BOM pins libs security/auth v0.3.1 (message text fix) and the Go floor is 1.26.11 (GO-2026-6859).
 Station's `go.mod` follows (own commit); generated wiring did not change. The Substrate pin before this was d453ac8.
+
+## Descriptor changes for the cutover (draft for the descriptor's owner; `deploy.yaml` is not changed until the cutover commit)
+
+`deploy.yaml` today installs the old `station` binary behind two units and keeps working for the old build, so it is replaced in
+the cutover commit, not earlier. The new shape per unit, using the unit names the current descriptor already has:
+
+```yaml
+# gateway (artifact installs the llm-gateway binary; symlink name unchanged so the unit keeps its path)
+unit_dropins:
+  - unit: com.hollis-labs.cerberus.station.station-llm-gateway.service
+    name: 20-fleet-exec.conf
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart="%h/.local/libexec/station-gateway/station-llm-gateway" "serve"
+      Environment=SUBSTRATE_CONFIG=%h/.config/station/gateway/substrate.yaml
+      Environment=LLM_GATEWAY_DATA_DIR=%h/.local/share/llm-gateway
+      TimeoutStopSec=40
+# usage monitor
+  - unit: com.hollis-labs.cerberus.station.station-usage-monitor.service
+    name: 20-fleet-exec.conf
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart="%h/.local/libexec/station-gateway/station-usage-monitor" "serve"
+      Environment=SUBSTRATE_CONFIG=%h/.config/station/usage/substrate.yaml
+      Environment=USAGE_MONITOR_DATA_DIR=%h/.local/share/usage-monitor
+      TimeoutStopSec=35
+```
+
+- Flags `-api-only`, `-api-config`, `-gateway-db` are gone (the commands refuse them). The unit's settings are the override file
+  (`SUBSTRATE_CONFIG`, a file on the host, not in the repository: `httphost.addr`, `identity.trusted_proxy: true`,
+  `llm-gateway.allowed_hosts` / `usage-monitor.allowed_hosts` with the public name) and the explicit data directory.
+- `TimeoutStopSec`: gateway 40 s (drain 15 s + close 10 s, above 25 s with margin); usage 35 s (10 s + 10 s, above 20 s). The MCP
+  host units need above 17 s (use 30 s) and must not set `KillMode=process` (Cerberus CW-20261112-0057).
+- The new data directories are fresh (`%h/.local/share/llm-gateway`, `.../usage-monitor`); the old `~/.local/state/station/{gateway,usage}`
+  directories and the `preflight` online backups stay untouched as the rollback. The new databases are created by `migrate-from`
+  during the write pause.
+- `restart` keeps its order (usage-monitor first, then the gateway), and `health` keeps the two `/healthz` URLs on 18083 and 18082.
+- Not written yet: the two MCP-host targets (avatar-station on 8097, design-station on 8110). The live descriptor has no entry for
+  them, so their unit names and who supplies their descriptor are needed from the driver.
