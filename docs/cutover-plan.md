@@ -6,6 +6,20 @@ approves the cutover (section 13). The rehearsal record is section 10; what it c
 Related: `docs/conversion-notes.md` (what changed and why, the gaps, the old-to-new tables), `docs/architecture.md`,
 `deploy/*.yaml` (the installer descriptors), `.github/workflows/build.yml` (three builds, one artifact per binary).
 
+## 0. The ledger (answered first)
+
+**The PostgreSQL ledger is kept exactly as it is: not migrated, not moved to SQLite.** The new gateway reads the same database with the
+same login, in `verify` mode, and the code carries the same three ledger schema versions (v1 to v3) as the old build, so the cutover
+applies no ledger migration and changes no ledger object. What the gateway reads is the **active revision's** ledger block, which
+`gateway-store migrate-from` copies verbatim: on the 2026-11-12 copy it is `store: postgres`, a structured connection (host, port, database,
+runtime login `..._r2`), `schema_mode: verify` and `password_ref: file://...` (the issued credential file, which resolves unchanged; no keychain
+entry is involved). The old `api.yaml` may name a different reference (a keychain DSN); it is not read by the new build, and the owner should
+confirm which of the two the old unit really used before the window (`llm-gateway validate` against the migrated revision answers it, since it opens the ledger).
+
+**Rollback for the ledger is nothing to undo.** Rows the new gateway wrote are valid for the old build (the same columns, proved by
+`TestPGInsertMatchesOldGatewayColumnForColumn`, 18 columns compared on the #28 head); the old unit simply reads and appends to the same
+tables. A `pg_dump -Fc` is taken in step zero as a safety copy, not because the plan needs a restore. What is lost on rollback is in section 11.
+
 ## 1. What changes for the owner
 
 Read this first. Everything else is how it is done.
