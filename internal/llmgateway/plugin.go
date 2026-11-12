@@ -164,6 +164,9 @@ func Start(ctx context.Context, host Host, cfg Config, o Options) (svc *Service,
 		{Method: "GET", Path: "/v1/usage", Scope: ScopeUsageRead, Handler: gw.UsageHandler()},
 		{Method: "GET", Path: "/v1/usage/export", Scope: ScopeUsageRead, Handler: gw.UsageExportHandler()},
 	}
+	for i := range svc.routes {
+		svc.routes[i].Raw = true
+	}
 	if o.Management != nil {
 		if o.RunningRevision <= 0 {
 			return nil, fmt.Errorf("llm-gateway: management requires the loaded running revision")

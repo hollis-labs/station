@@ -37,7 +37,12 @@ type Route struct {
 	Scope string
 	// MaxBodyBytes caps this route's request body; zero means DefaultMaxBody.
 	MaxBodyBytes int64
-	Handler      http.Handler
+	// Raw marks a route whose error bodies are the upstream dialect's own (OpenAI or Anthropic
+	// shaped) and must reach the client untouched. The framework rewrites error bodies into its
+	// flat shape unless the route is exempt (docs/conversion-notes.md, Gap 11), so a host serves
+	// Raw routes only through a framework opt-out.
+	Raw     bool
+	Handler http.Handler
 }
 
 // Limited returns the route's handler with its request body cap applied.
