@@ -36,7 +36,7 @@ Survey only, no code converted. Data is in use: it is migrated, never moved asid
    needs descriptors for all four.
 9. **Hygiene:** provider API keys inline in design-station's config env block (move to the `secrets` module); the
    design-station paths have empty `bearer_tokens` (open today); `deploy.yaml` holds an absolute personal path and a host
-   name; no `scripts/scan-public` in the repo. Findings only, nothing changed.
+   name; no `scripts/scan-public` in the repo. Findings only, nothing changed (all since fixed; see the hygiene table).
 10. **Postgres ledger** is a container database published on loopback and a tailnet address, with a Cerberus descriptor
     and a compose file beside the gateway config (not in this repo). Cutover must preserve it untouched.
 
@@ -134,7 +134,8 @@ Remaining, by file (replacement when the file is rewritten for the port):
 | `internal/secretref/resolve_test.go` (2 lines), `station.yaml` (1 line) | secret-assignment rule matches `<NAME>_TOKEN: keychain://...`, which is a reference, not a credential | allowlist candidates with that reason; run-time assembly does not help because the scanner matches the assignment shape |
 
 History: the same patterns, first added in the commits the scanner lists; no rewrite, no allowlist until the owner rules.
-`scripts/scan-public` is not in this repo; it lives in the Substrate repo (`scripts/scan-public`).
+CI runs `go run github.com/hollis-labs/substrate/cmd/substrate scan-public --tree` (the framework command, tree only until the
+one program-wide history pass); the copied script was deleted.
 gitleaks reported nothing in tree or history (driver check); `station.yaml` line 61 is a keychain reference.
 
 ## Usage-monitor cutover: write pause (planned, not delta)
@@ -164,15 +165,17 @@ confirmed. The owner approves the loss window with the plan.
 
 ## Open points found while porting
 
-1. **Headless first-run setup.** Each unit starts with `GET /api/setup` -> `setup_required: true` and `POST /api/setup`
-   creates the owner; keys are then issued with `POST /api/identity/keys` and shown once. At cutover that is four
-   units: avatar-station, design-station, llm-gateway, usage-monitor. Steps per unit: start it on loopback only,
-   run setup from the host (a command that reads the password from a file, not an argument), issue the keys for that
-   unit's clients, write each key to a 0600 file named for the client, hand the files to the client's owner (never
-   by mail or in a prompt), then open the unit to its clients. Doing this by hand over HTTP four times is error-prone
-   and leaves the setup endpoint open between start and the first call; an offline bootstrap command for the identity
-   module (create owner and first admin key without HTTP) is a framework candidate and Station is a strong case.
-   Not invented here.
+1. **First-run setup is offline (resolved by the framework, pin d453ac8).** `identity.setup` defaults to `offline`:
+   `POST /api/setup` is always refused (403 `setup_offline`) and `GET /api/setup` answers
+   `{setup_required, setup_over_http}`. The owner and the first keys are created with the binary's own commands
+   before it serves: `<binary> identity setup --username NAME` (password from a no-echo prompt or the first line of
+   stdin, never an argument or the environment; refuses when an owner exists) and `<binary> identity key create
+   --name N --scope S... (--out PATH | --stdout)` (a new 0600 file, never overwritten). They run through the normal
+   boot, so the data directory, database, signing key and secrets are the server's, and they DO create those files;
+   `plan()` starts them with the write module set and read-only commands still create nothing. Tests create the
+   owner with the command (in process through the root command, and with the real binary in the SIGTERM test);
+   `TestAcceptance` asserts the HTTP setup is refused and `setup_required` flips once the command ran. The four
+   per-unit first runs are scripted in `scripts/first-run` (see "First-run script").
 2. **Secrets: legacy mapping not carried.** The old resolver chained the `secrets` store with a `tether` legacy mapping
    and the api-projection credential resolver (its own keychain service, `helper://`). The new service resolves env
    references through the `secrets` module's resolver only, so references provisioned only under the old
@@ -315,3 +318,33 @@ only the new code (`./cmd/station-next/...`, `./internal/...`, 0 issues).
 - Widen the CI lint step from `./cmd/station-next/... ./internal/...` to `./...` (the 55 findings above disappear with
   the old code).
 - Rewrite `AGENTS.md` and the README (both still say "not released") and the fleet descriptors for all four units.
+
+## Pin d453ac8: what Station adopts and what it does not
+
+- **Adopted:** (1) offline `identity setup` and `identity key create`, in the write set of `plan()`; (2) offline setup
+  default, with tests and the first-run script; (5) `substrate scan-public --tree` in CI, copy deleted.
+- **(3) Local trust for stdio MCP: not applicable.** `mcp.StdioOptions{LocalTrust, LocalScopes}` belongs to Substrate's
+  own `mcp` module. Station does not use that module: its MCP serving is the libs mcp-host engine mounted over HTTP, and
+  `serve.stdio` of a logical server is refused. Serving a logical server over stdio would be code in the engine
+  wrapper, with its own guard; it is not needed by any live unit, so nothing is built and nothing is invented.
+- **(4) `httphost.Stopping`: not adopted, on purpose.** Station has no long-lived handler of its own (no SSE,
+  WebSocket or long poll; the libs handler is POST-only). An in-flight tool call is a bounded request that the 5 s grace
+  period lets finish; cancelling it the moment a stop begins would abort short calls on every restart. The busy-child
+  orphan finding is unchanged by this pin.
+- **(6) Queue and `database.sqlite.read_pool` options:** no workaround to remove; not used.
+- **Not in this pin** and not needed: the Host check in `httphost` (the `internal/hostguard` copy stays), the
+  cross-process open-and-migrate lock, `queue.reservation_secs`, the MCP JSON-response option.
+
+## First-run script
+
+`scripts/first-run UNIT` sets one unit up offline, for `avatar-station`, `design-station`, `llm-gateway` or
+`usage-monitor`: the owner (`identity setup`, password from the first line of a 0600 file through stdin) and one new
+0600 key file per client (`identity key create --out`, never overwritten), with the scopes in the client table above.
+It reads everything from the environment (`FIRST_RUN_BIN`, `SUBSTRATE_CONFIG`, `FIRST_RUN_DATA_DIR`,
+`FIRST_RUN_PASSWORD_FILE`, `FIRST_RUN_KEYS_DIR`), requires an explicit absolute data directory (it sets the variable the
+binary reads, so a forgotten one cannot reach the live directory), refuses a loose-mode password file or keys
+directory, and a second run changes nothing (setup refuses when an owner exists).
+`TestFirstRunScript` runs it with the real binary for avatar-station and design-station against throwaway data
+directories and also covers the refusals. The llm-gateway and usage-monitor entries are in the script and get the same
+test when those binaries exist. At cutover the operator runs it once per unit before the unit serves on its live port,
+then hands each key file to its client's owner.
