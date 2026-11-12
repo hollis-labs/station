@@ -336,7 +336,7 @@ executable (exit 1), so the specifier was expanded.
 repository) reports 55 issues: 49 errcheck, 4 staticcheck, 2 unused. All are in `cmd/station`, `platform/` and
 `plugins/`, the code the remaining ports replace. A clean export of the base commit (31c6c83) shows the same 55, so they
 are existing debt, not from this port, and they are deliberately not fixed in code that is about to be deleted. CI lints
-only the new code (`./cmd/station-next/...`, `./internal/...`, 0 issues).
+only the new code (`./cmd/station-next/...`, `./cmd/llm-gateway/...`, `./cmd/usage-monitor/...`, `./internal/...`, 0 issues).
 
 ## What the last port must do
 
@@ -429,6 +429,37 @@ an unknown key (401), a key without the scope (403 `scope_required`), a foreign 
 removed clients route (403 `route_not_mapped`); SIGTERM exits 0; no credential in the log. Binding to 0.0.0.0, `[::]`,
 `:0`, a documentation address and a tailnet address is refused before listening (the check was removed once and the
 test failed). The read-only commands create nothing under an empty HOME (positive control: `secret set`).
+
+## usage-monitor port: what is written and verified (cmd/usage-monitor, internal/usagemonitor)
+
+**Shape.** `internal/usagemonitor` is the old `plugins/usage-monitor` on `database.From(app)` (libs core/store, one write
+connection): reads go through `Reader()`, writes (`PutAccount`, `Ingest`) through `WriteTx`, so callbacks are re-runnable.
+`Start(ctx, host, cfg, opts)` returns routes; `Service.Run(ctx)` is the collector loop. `cmd/usage-monitor` is its own unit:
+default `127.0.0.1:18086` (live unit: 18083), database `usage-monitor.db`, data dir from `USAGE_MONITOR_DATA_DIR`.
+
+**Old to new.**
+
+| Old | New |
+|---|---|
+| `station serve` with the usage-monitor plugin | `usage-monitor serve` |
+| `database:` in the usage config | removed (the module owns the database) |
+| bearer client registry | identity API keys: `usage-monitor.read`, `.ingest`, `.admin` scopes per route |
+| push source `principal: <client id>` | `principal: key:<id>` (the key id comes from `GET /api/identity/keys`) |
+| nested/OpenAI-style errors | flat `{code, message}` (`apierr`) |
+| old `usage.db` in place | `usage-monitor migrate-from --old-db <copy>`; the service refuses an old-format file |
+
+**Verified (real binary, throwaway data dir, `-race`).** Setup and keys, serve, ingest as the bound key (200), a second
+ingest-scoped key refused `source_forbidden`, stale account revision 409, 401/403/foreign-Host refusals, unmapped route 403,
+SIGTERM exit 0, no credential in the log. `migrate-from` carries accounts, audit, observations and events with sequences
+kept, in one transaction, verifying a per-table digest and `integrity_check` against the old file; a second run and a
+missing source are refused. `internal/usagemonitor` passes `-race -count=6`, including collectors writing while the API
+reads on one read connection.
+
+**Cutover (write pause).** Stop the old unit, `migrate-from` a copy, check counts, start the new unit. Counts seen: accounts
+11, observations about 84k, events 67. Rollback loses what the new unit recorded after start. Shutdown is a 10 s drain plus
+10 s for collectors, so the service manager's stop timeout must be above 20 s. Re-provision: reporter keys (push sources are
+bound to `key:<id>`), the gateway collector's credential_ref and gateway URL, and the operator and reader keys
+(`scripts/first-run usage-monitor`).
 
 ## Pin d453ac8: what Station adopts and what it does not
 

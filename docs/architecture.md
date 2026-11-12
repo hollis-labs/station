@@ -210,6 +210,14 @@ client (key from identity) -> Host check -> session/bearer -> request id + x-api
   an opt-out exists; the path question (they live under `/api/llm-gateway`, where mounts are refused) is in Gap 11 too.
 - Shutdown: drain HTTP (15 s) then close the gateway (10 s); a unit stop timeout above 25 s.
 
+## 12. The usage service (cmd/usage-monitor)
+
+Own binary and unit, same boot path as the gateway (`internal/appboot`): bind check first (loopback only), then the
+database module on SQLite, then `internal/usagemonitor` routes behind `auth.ScopeTable`, wrapped by the Host guard and
+the identity middleware. Collectors run beside the server (`Service.Run`) and stop after the drain. The store uses the
+single write connection through `WriteTx`; an old `usage.db` is refused at start and copied by `migrate-from`.
+
+
 ## Bind rule
 
 Station units listen on loopback only, by Station's own rule: in `enforce` mode the framework's bind check accepts
