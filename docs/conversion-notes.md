@@ -570,3 +570,37 @@ and its source `principal` becomes `key:<id>`.
 | llm-gateway | 15 s | 10 s | 25 s (the driver asks for the drop-in in the descriptor) |
 | usage-monitor | 10 s | 10 s collectors | 20 s |
 | MCP host (avatar, design) | engine stop | busy child may outlive it | above 17 s; no `KillMode=process` (Cerberus CW-20261112-0057) |
+
+## Public name, proxy and the keychain (from the live usage config structure, driver 2026-11-12)
+
+**Live gateway collectors.** The live usage monitor has 12 sources (11 accounts): four direct (claude, codex, agy, opencode-go with
+a keychain reference) and eight `gateway` collectors (opencode-go, opencode-go-claude, openai-work, anthropic-work,
+gemini-work, openrouter, huggingface, jev), each with a file credential reference and `gateway_url` on the gateway's public name.
+They present the operator's token today. At cutover each source's `credential_ref` points at the new `usage-collector` key
+(one key may serve all eight; the driver says whether the eight references name one file or several).
+
+**Who arrives by the public name.** From `docs/llm-gateway-adoption.md`: every relay client (OpenAI and Anthropic SDKs, the JEV
+decision client, the usage monitor's collectors) uses `https://<public name>/api/llm-gateway`; Caddy terminates TLS on the tailnet
+address and forwards to the loopback listener. Only the host-local diagnostic root is plain loopback
+(`http://127.0.0.1:18082/api/llm-gateway/v1`). The usage monitor itself is documented only as loopback 18083 (health and keys
+file); no document gives it a public name. If the driver finds one in the proxy config, the usage unit needs the same two
+settings.
+
+**What the ported gateway needs.** `llm-gateway.allowed_hosts: [<public name>]` and `identity.trusted_proxy: true` in the unit's
+override file. `TestServedThroughTheTLSProxyName` runs the real binary and proves: a listed Host with a loopback peer and exactly
+one `X-Forwarded-Proto: https` is served (200); the same Host with no header, `http`, or two values is refused (403); an unlisted
+Host is refused; a key without the scope is refused; a loopback Host still works. Mutating the allowed list makes the first case
+fail. The usage-collector request (`GET /v1/usage/export` with `llm-gateway.usage.read`) rides the same path but is a relay
+route, so its test is added with the relay wiring (the proxied-name check, then the 200 with the collector key).
+
+**keychain:// on Linux.** The usage monitor resolves references through the secrets module's resolver, which is libs
+security/secrets over go-keyring: on Linux it talks to the Secret Service (gnome-keyring, KeePassXC) over D-Bus, so `keychain://`
+is supported when the user session's bus is reachable (the unit's `DBUS_SESSION_BUS_ADDRESS`/`XDG_RUNTIME_DIR` must be set; a
+user unit has them). Entry location: service `hollis-labs`, account `<namespace>/<key>` (the module's `secrets.service` can
+change the service). **Difference from the old build:** the old platform added a read-through to the legacy service `tether`,
+account `provider-api-key:<namespace>/<key>`; the Substrate secrets module has no option for that. A value that exists only in
+the legacy location (a value stored by an older Tether tool) will not resolve in the new unit. The cutover step: for each keychain
+reference in use (`keychain://station/opencode-go` for usage, `keychain://station/ledger-dsn` for the gateway), the driver
+checks where the entry lives (attributes only, not values); if it is under `tether`, the owner re-enters it with
+`<unit> secret set <ref>` (stdin, never printed) or it moves to a `file://` reference. A positive-control check, `<unit> secret
+check <ref>`, confirms resolution before the old unit is stopped. Framework ask: `secrets.legacy` config for the read-through.

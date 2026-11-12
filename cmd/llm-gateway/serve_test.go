@@ -220,3 +220,85 @@ func (u *unit) mustRunStdout(stdin string, args ...string) string {
 	}
 	return string(out)
 }
+
+// The live clients reach the gateway by its public name through a local TLS proxy. A listed Host is
+// served only from a loopback peer carrying exactly one X-Forwarded-Proto: https; anything else is
+// refused, and the key's scopes still decide what the request may do.
+func TestServedThroughTheTLSProxyName(t *testing.T) {
+	const public = "gw.example.test"
+	u := newUnit(t, "")
+	cfg := fmt.Sprintf("httphost: {addr: %q}\nidentity: {bcrypt_cost: 4, trusted_proxy: true}\nllm-gateway: {allowed_hosts: [%s]}\n", u.addr, public)
+	if err := os.WriteFile(u.cfg, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	u.mustRun(ownerPassphrase+"\n", "identity", "setup", "--username", "owner")
+	ops := strings.TrimSpace(u.mustRunStdout("", "identity", "key", "create", "--name", "ops", "--scope", "llm-gateway.management.read", "--stdout"))
+	narrow := strings.TrimSpace(u.mustRunStdout("", "identity", "key", "create", "--name", "chat-only", "--scope", "llm-gateway.chat", "--stdout"))
+	u.mustRunStdout("", "gateway-store", "stage", "--input", writeFile(t, "doc.json", gatewayDoc(t)), "--expected", "0", "--actor", "test")
+	u.mustRun("", "gateway-store", "activate", "--revision", "1", "--expected", "0", "--actor", "test")
+
+	cmd := u.command("", "serve")
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	base := "http://" + u.addr
+	for i := 0; ; i++ {
+		if r, err := http.Get(base + "/healthz"); err == nil {
+			_ = r.Body.Close()
+			break
+		}
+		if i > 100 {
+			t.Fatalf("the binary never listened\n%s", stderr.String())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	status := "/api/llm-gateway/v1/management/status"
+	call := func(key, host string, proto ...string) int {
+		t.Helper()
+		req, _ := http.NewRequest("GET", base+status, nil)
+		req.Header.Set("Authorization", "Bearer "+key)
+		req.Host = host
+		for _, p := range proto {
+			req.Header.Add("X-Forwarded-Proto", p)
+		}
+		res, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = res.Body.Close()
+		return res.StatusCode
+	}
+	for _, tc := range []struct {
+		name  string
+		key   string
+		host  string
+		proto []string
+		want  int
+	}{
+		{"proxied, listed host, one https", ops, public, []string{"https"}, 200},
+		{"listed host without the proxy header", ops, public, nil, 403},
+		{"listed host, http claimed", ops, public, []string{"http"}, 403},
+		{"listed host, two proxy values", ops, public, []string{"https", "https"}, 403},
+		{"unlisted host with the header", ops, "other.example.test", []string{"https"}, 403},
+		{"proxied, key without the scope", narrow, public, []string{"https"}, 403},
+		{"loopback host, no proxy", ops, u.addr, nil, 200},
+	} {
+		if got := call(tc.key, tc.host, tc.proto...); got != tc.want {
+			t.Errorf("%s: %d, want %d", tc.name, got, tc.want)
+		}
+	}
+	_ = cmd.Process.Signal(syscall.SIGTERM)
+	select {
+	case err := <-exited:
+		if err != nil {
+			t.Fatalf("exit status %v\n%s", err, stderr.String())
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the binary did not exit after SIGTERM")
+	}
+}
