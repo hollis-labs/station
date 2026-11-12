@@ -17,6 +17,11 @@ const Key = "station"
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
+// reservedIDs are logical-server ids whose scope station.<id> already means something to the
+// framework: station.admin is the scope identity requires to mint keys and users and to rotate the
+// signing key, so a server named admin would make every key holding its scope an administrator.
+var reservedIDs = map[string]bool{"admin": true}
+
 // Config is the parsed block.
 type Config struct {
 	// MCP is mcp-host's own configuration of the logical servers.
@@ -63,6 +68,9 @@ func Parse(raw any) (*Config, error) {
 		at := fmt.Sprintf("station.logical_servers[%d] (%s)", i, ls.ID)
 		if !idPattern.MatchString(ls.ID) {
 			return nil, fmt.Errorf("%s: id must be lower-case letters, digits and hyphens (it names the scope station.<id>)", at)
+		}
+		if reservedIDs[ls.ID] {
+			return nil, fmt.Errorf("%s: id %q is reserved (station.%s is a framework scope); pick another id", at, ls.ID, ls.ID)
 		}
 		if ls.Serve == nil {
 			continue

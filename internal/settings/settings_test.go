@@ -47,6 +47,8 @@ func TestParseRefusesWithTheKeyNamed(t *testing.T) {
 		"nothing":        {nil, "logical_servers"},
 		"unknown key":    {map[string]any{"logical_servers": block(server("a", "/a", nil))["logical_servers"], "bogus": 1}, "station.bogus"},
 		"bad id":         {block(server("Bad_ID", "/a", nil)), "id must be"},
+		"admin id":       {block(server("admin", "/a", nil)), "is reserved"},
+		"admin no serve": {block(map[string]any{"id": "admin", "name": "A", "transport": "process", "process": map[string]any{"command": "/x"}}), "is reserved"},
 		"bearer tokens":  {block(withTokens), "bearer_tokens was removed"},
 		"stdio":          {block(stdio), "serve.stdio is not ported"},
 		"reserved path":  {block(server("a", "/api/x", nil)), "serve.http.path"},
