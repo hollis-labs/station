@@ -67,11 +67,12 @@ func Start(ctx context.Context, app string, cfg *mcpconfig.Config, res Resolver,
 		h.order = append(h.order, ls.ID)
 		if checks != nil {
 			if entry, ok := reg.Get(ls.ID); ok {
-				checks.Add("mcp:"+ls.ID, cachedCheck(func(ctx context.Context) error {
-					cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-					defer cancel()
+				// /healthz is unauthenticated: the report says only that the server is not answering;
+				// the cause goes to the log.
+				checks.Add("mcp:"+ls.ID, cachedCheck(ctx, healthTimeout, func(cctx context.Context) error {
 					if _, err := entry.Transport.ListTools(cctx); err != nil {
-						return fmt.Errorf("logical server %s is not answering: %w", ls.ID, err)
+						log.Warn("station: logical server health check failed", "id", ls.ID, "err", err)
+						return errNotAnswering
 					}
 					return nil
 				}, healthTTL, time.Now))

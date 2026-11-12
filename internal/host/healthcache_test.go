@@ -13,7 +13,7 @@ func TestCachedCheckReusesResultWithinTTL(t *testing.T) {
 	var mu sync.Mutex
 	calls := 0
 	fail := false
-	c := cachedCheck(func(context.Context) error {
+	c := cachedCheck(context.Background(), time.Second, func(context.Context) error {
 		calls++
 		if fail {
 			return errors.New("down")
@@ -52,7 +52,7 @@ func TestCachedCheckReusesResultWithinTTL(t *testing.T) {
 func TestCachedCheckSharesOneRunAmongConcurrentCallers(t *testing.T) {
 	var runs int
 	var mu sync.Mutex
-	c := cachedCheck(func(context.Context) error {
+	c := cachedCheck(context.Background(), time.Second, func(context.Context) error {
 		mu.Lock()
 		runs++
 		mu.Unlock()
@@ -67,5 +67,32 @@ func TestCachedCheckSharesOneRunAmongConcurrentCallers(t *testing.T) {
 	wg.Wait()
 	if runs != 1 {
 		t.Fatalf("30 concurrent callers ran the check %d times, want 1", runs)
+	}
+}
+
+// A caller that disconnects while the check runs must not turn the check into a failure that the
+// next callers read from the cache: the run uses the server's context, not the request's.
+func TestCachedCheckIgnoresTheCallersContext(t *testing.T) {
+	c := cachedCheck(context.Background(), time.Second, func(ctx context.Context) error {
+		return ctx.Err() // a check that notices cancellation, as ListTools does
+	}, time.Minute, time.Now)
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := c(gone); err != nil {
+		t.Fatalf("the cancelled caller's context reached the check: %v", err)
+	}
+	if err := c(context.Background()); err != nil {
+		t.Fatalf("the next caller was served the cancelled caller's failure: %v", err)
+	}
+}
+
+func TestCachedCheckBoundsEachRun(t *testing.T) {
+	c := cachedCheck(context.Background(), 20*time.Millisecond, func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}, time.Minute, time.Now)
+	start := time.Now()
+	if err := c(context.Background()); err == nil || time.Since(start) > 2*time.Second {
+		t.Fatalf("a stuck check was not cut off: err=%v after %v", err, time.Since(start))
 	}
 }
