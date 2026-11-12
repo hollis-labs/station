@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -30,11 +31,12 @@ const (
 	closeTimeout  = 10 * time.Second
 )
 
-// relayWired says whether the relay routes (chat, responses, messages, embeddings, systemone,
-// models, catalog, usage) are served. Their error bodies are OpenAI- or Anthropic-shaped and
-// httphost rewrites every error body into its flat shape (docs/conversion-notes.md, Gap 11), so
-// they stay unmounted until the framework has a per-route opt-out and Station pins it.
-const relayWired = false
+// relayPrefix is the subtree of the relay and its management API. The relay's error bodies are OpenAI- or
+// Anthropic-shaped and clients depend on them, so the framework must not rewrite them (docs/conversion-notes.md,
+// Gap 11): httphost.Options.RawPrefixes serves this prefix's handler responses untouched, while the guard, the scope
+// table and every other refusal by the framework on the same paths stay flat. The management handlers write flat
+// errors themselves.
+const relayPrefix = llmgateway.RoutePrefix + "/v1/"
 
 // gateway is what the commands share: the started framework app. ready, when set, learns the bound
 // address (tests listen on port 0). event, when set, records the shutdown steps in order.
@@ -129,19 +131,15 @@ func (g *gateway) serve(ctx context.Context) error {
 
 	table := auth.ScopeTable(app)
 	mux := http.NewServeMux()
-	skipped := 0
 	for _, rt := range svc.Routes() {
-		if rt.Raw && !relayWired {
-			skipped++
-			continue
+		if !strings.HasPrefix(llmgateway.RoutePrefix+rt.Path, relayPrefix) {
+			_ = svc.Close(context.Background())
+			return fmt.Errorf("llm-gateway: route %s is outside %s", rt.Path, relayPrefix)
 		}
 		table.Route(rt.Method, llmgateway.RoutePrefix+rt.Path, rt.Scope)
 		mux.Handle(rt.Method+" "+llmgateway.RoutePrefix+rt.Path, rt.Limited())
 	}
-	if skipped > 0 {
-		slog.Warn("llm-gateway: relay routes are not mounted until the framework's raw-error opt-out is pinned", "routes", skipped)
-	}
-	handler, err := httphost.Handler(app, httphost.Options{Routes: mux})
+	handler, err := httphost.Handler(app, httphost.Options{Routes: mux, RawPrefixes: []string{relayPrefix}})
 	if err != nil {
 		_ = svc.Close(context.Background())
 		return err

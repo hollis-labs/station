@@ -39,8 +39,8 @@ type Route struct {
 	MaxBodyBytes int64
 	// Raw marks a route whose error bodies are the upstream dialect's own (OpenAI or Anthropic
 	// shaped) and must reach the client untouched. The framework rewrites error bodies into its
-	// flat shape unless the route is exempt (docs/conversion-notes.md, Gap 11), so a host serves
-	// Raw routes only through a framework opt-out.
+	// flat shape unless the path is declared raw (httphost.Options.RawPrefixes; docs/conversion-notes.md,
+	// Gap 11), so a host declares the relay's prefix there.
 	Raw     bool
 	Handler http.Handler
 }

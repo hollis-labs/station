@@ -206,8 +206,9 @@ client (key from identity) -> Host check -> session/bearer -> request id + x-api
 - Loopback only by Station's rule (`RequireLoopbackBind`), before anything listens. The gateway is reached from other
   machines through a local TLS proxy listed in `llm-gateway.allowed_hosts`; reaching it directly from another host would be an
   owner decision and a change to this rule.
-- Relay routes: the framework rewrites OpenAI-shaped error bodies into its flat shape (Gap 11), so they stay unmounted until
-  an opt-out exists; the path question (they live under `/api/llm-gateway`, where mounts are refused) is in Gap 11 too.
+- Relay routes: served under `/api/llm-gateway/v1/` (client base URLs unchanged). The framework would rewrite OpenAI-shaped error bodies
+  into its flat shape, so the prefix is declared in `httphost.Options.RawPrefixes` (Substrate 0f2899e): the relay's responses are untouched,
+  while the guard's and the scope table's refusals on the same paths stay flat (Gap 11).
 - Shutdown: drain HTTP (15 s) then close the gateway (10 s); a unit stop timeout above 25 s.
 
 ## 12. The usage service (cmd/usage-monitor)

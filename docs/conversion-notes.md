@@ -39,7 +39,14 @@ Survey only, no code converted. Data is in use: it is migrated, never moved asid
    name; no `scripts/scan-public` in the repo. Findings only, nothing changed (all since fixed; see the hygiene table).
 10. **Postgres ledger** is a container database published on loopback and a tailnet address, with a Cerberus descriptor
     and a compose file beside the gateway config (not in this repo). Cutover must preserve it untouched.
-11. **httphost rewrites the gateway's OpenAI-shaped errors (found at the start of cmd/llm-gateway; reported, waiting).**
+11. **httphost rewrites the gateway's OpenAI-shaped errors (found at the start of cmd/llm-gateway; RESOLVED by Substrate 0f2899e, `httphost.Options.RawPrefixes`).**
+    *Resolution:* `cmd/llm-gateway` declares `RawPrefixes: ["/api/llm-gateway/v1/"]`, the relay's own subtree, and mounts every route. The
+    handlers' responses on that prefix are served untouched; the guard, the scope table and the framework's other refusals on the same paths stay flat.
+    `TestRelayErrorsReachTheClientUntouchedAndFrameworkRefusalsStayFlat` runs the real binary against a fake upstream: an OpenAI-style 400 whose bytes are
+    deliberately non-canonical (double space, key order, trailing newline) comes back byte for byte with its headers; the gateway's own relay error keeps
+    the OpenAI shape; no key (401), a key without the scope (403) and an unmapped path under the prefix (403 `route_not_mapped`) are flat. Mutation check:
+    without `RawPrefixes` the same upstream error arrives as `{"code":"unsupported_parameter","message":...}` and the test fails. The management API shares
+    the prefix and writes flat errors itself. The original finding follows.
     `httphost.Handler` wraps every route and every mount in `apierr.Normalize`, which turns a JSON error body of the form
     `{"error":{"code":"...","message":"..."}}` (status 400 and above) into the flat `{code, message}`. The gateway
     exists to relay OpenAI- and Anthropic-compatible APIs, and its OpenAI-dialect errors are exactly that nested
@@ -346,8 +353,7 @@ only the new code (`./cmd/station-next/...`, `./cmd/llm-gateway/...`, `./cmd/usa
   the old code).
 - Delete `internal/llmgateway/ledger_compat_test.go` (it imports `plugins/llm-gateway` and `platform`), `scripts/` mentions
   of `station client`, and the old `api.example.yaml` / `usage-monitor.example.yaml` shapes.
-- Flip `relayWired` in `cmd/llm-gateway/serve.go` once the framework's raw-error opt-out is pinned (Gap 11) and move the
-  relay routes onto it; update the Gap 11 text and the evidence.
+- (Done: the relay routes are mounted behind `RawPrefixes`, Gap 11.)
 - Rewrite `AGENTS.md` and the README (both still say "not released") and the fleet descriptors for all four units.
 
 ## llm-gateway port: what is written and verified (cmd/llm-gateway, internal/llmgateway)
@@ -367,9 +373,8 @@ the active revision in the service database, as it was in the old managed mode; 
   new document naming clients is refused with a message pointing at the identity module.
 - Management errors use the framework's flat `{code, message, details}` shape (`details.request_id`).
 - `ledger.sqlite.path` is refused: the SQLite ledger lives in the service database.
-- The relay routes are **not mounted** (`relayWired = false`, each route is marked `Raw`): see Gap 11. `serve` logs a warning
-  with the count. Until the framework has a per-route opt-out and Station pins it, the new binary serves the management API
-  and health only, and nothing may be cut over to it.
+- The relay routes are mounted, behind `httphost.Options.RawPrefixes` (`/api/llm-gateway/v1/`): see Gap 11. (Earlier drafts of this section
+  said they were unmounted until the framework had an opt-out; Substrate 0f2899e has it.)
 - Shutdown: `shutdownGrace` 15 s (a stream that outlives it is cut) plus `closeTimeout` 10 s (ledger flush, catalog stop), so
   the unit's stop timeout must exceed 25 s.
 - Not ported: Tether-JWT verification from the old `auth.jwt` block (the live config uses keys only), the old middleware
@@ -425,8 +430,8 @@ passed six runs in a row.
 **What is verified, by test.** The real binary: offline `identity setup` and `identity key create`, `gateway-store stage` and
 `activate`, `validate`, `serve` on a loopback port, a read (`/status`: running revision 1) and a write (`PUT /config` with the
 precondition stages revision 2, read back through `/models?revision=2`) through the management API; refused: no key (401),
-an unknown key (401), a key without the scope (403 `scope_required`), a foreign Host (403), the unmounted relay route and the
-removed clients route (403 `route_not_mapped`); SIGTERM exits 0; no credential in the log. Binding to 0.0.0.0, `[::]`,
+an unknown key (401), a key without the scope (403 `scope_required`), a foreign Host (403), a relay route without its scope and the
+removed clients route (403); SIGTERM exits 0; no credential in the log. Binding to 0.0.0.0, `[::]`,
 `:0`, a documentation address and a tailnet address is refused before listening (the check was removed once and the
 test failed). The read-only commands create nothing under an empty HOME (positive control: `secret set`).
 
@@ -525,8 +530,8 @@ repository (the `station-operator` client holds `llm-gateway.*` and could call t
   caller presents a key from that file; no Tether-issued JWT. `auth.jwt` is not ported. The keys file is one YAML list of
   `{id, sha256, scopes}`; each entry becomes a new identity API key with `llm-gateway.*` scopes in the re-provisioning list
   (names and holders pending from the driver).
-- **Relay gate.** The relay routes stay unreachable in every build (`relayWired` false) until a test proves an upstream
-  OpenAI error arrives byte for byte and a framework refusal arrives flat.
+- **Relay gate.** The relay routes were unreachable in every build until a test proved an upstream OpenAI error arrives byte for byte and a
+  framework refusal arrives flat; that test now exists and passes (Gap 11), and the routes are mounted.
 
 ## Rehearsal on the live online-backup copies (2026-11-12, scratch directories, copies of the copies)
 
@@ -770,3 +775,10 @@ Runbook note: `fleet-install deploy station` needs `--target` with one of the tw
 ## CI version stamp (driver notice, tools follow-up CW-20261112-0123)
 
 The shared build workflow creates `dist/` inside the checkout, which makes Go stamp `+dirty`. `/dist/` is now in `.gitignore` with a comment.
+
+## Pin 0f2899e (2026-11-12)
+
+Substrate main 0f2899ed9fca (after 4f82c47, which added a BOM pin for libs core/panics): `httphost.Options.RawPrefixes` (routes under `/api/`, prefix
+ending in `/`) and `Mount.Raw`. `go.mod` follows; `pins check` matches the bom; the relay is wired on it (Gap 11). The usage collector's
+request (`GET /v1/usage/export`, key `llm-gateway.usage.read`) through the proxy name is covered in `TestServedThroughTheTLSProxyName`: 200 with
+the proxy header, 403 without it, 403 for a chat-only key and for the collector key on a management route.

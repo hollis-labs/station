@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,12 @@ const ownerPassphrase = "a long test passphrase"
 // environment) and one model, with the catalog kept off the network.
 func gatewayDoc(t *testing.T, models ...string) string {
 	t.Helper()
+	return gatewayDocAt(t, "http://127.0.0.1:9/v1", models...)
+}
+
+// gatewayDocAt is gatewayDoc with the one provider's base URL given.
+func gatewayDocAt(t *testing.T, baseURL string, models ...string) string {
+	t.Helper()
 	if len(models) == 0 {
 		models = []string{"chat"}
 	}
@@ -33,9 +40,9 @@ func gatewayDoc(t *testing.T, models ...string) string {
 		ms = append(ms, fmt.Sprintf(`{"name":%q,"targets":[{"provider":"local","model":"upstream"}]}`, m))
 	}
 	return fmt.Sprintf(`{"schema_version":1,"gateway":{
- "providers":[{"id":"local","dialect":"openai","base_url":"http://127.0.0.1:9/v1","api_key_env":"LLMGW_TEST_KEY"}],
+ "providers":[{"id":"local","dialect":"openai","base_url":%q,"api_key_env":"LLMGW_TEST_KEY"}],
  "models":[%s],
- "catalog":{"refresh":false,"cache_dir":%q,"warmup":false}}}`, strings.Join(ms, ","), filepath.Join(t.TempDir(), "catalog"))
+ "catalog":{"refresh":false,"cache_dir":%q,"warmup":false}}}`, baseURL, strings.Join(ms, ","), filepath.Join(t.TempDir(), "catalog"))
 }
 
 func writeFile(t *testing.T, name, body string) string {
@@ -167,7 +174,7 @@ func TestRealBinaryLifecycle(t *testing.T) {
 	}
 
 	// Refused: no key, a key without the scope, a wrong key, a Host the unit does not serve, a
-	// relay route (not mounted), and the old client routes.
+	// relay route without its scope, and the old client routes.
 	for _, tc := range []struct {
 		name, method, path, key string
 		hdr                     map[string]string
@@ -177,7 +184,7 @@ func TestRealBinaryLifecycle(t *testing.T) {
 		{"wrong key", "GET", mgmt + "/status", "not-a-key", nil, []int{401}},
 		{"narrow scope", "GET", mgmt + "/status", narrow, nil, []int{403}},
 		{"foreign host", "GET", mgmt + "/status", ops, map[string]string{"Host": "gateway.example.test"}, []int{403}},
-		{"relay route", "POST", "/api/llm-gateway/v1/chat/completions", narrow, nil, []int{403}},
+		{"relay route without its scope", "POST", "/api/llm-gateway/v1/embeddings", narrow, nil, []int{403}},
 		{"clients route", "GET", mgmt + "/clients", ops, nil, []int{403}},
 	} {
 		got, out := call(tc.method, tc.path, tc.key, `{}`, tc.hdr)
@@ -234,6 +241,7 @@ func TestServedThroughTheTLSProxyName(t *testing.T) {
 	u.mustRun(ownerPassphrase+"\n", "identity", "setup", "--username", "owner")
 	ops := strings.TrimSpace(u.mustRunStdout("", "identity", "key", "create", "--name", "ops", "--scope", "llm-gateway.management.read", "--stdout"))
 	narrow := strings.TrimSpace(u.mustRunStdout("", "identity", "key", "create", "--name", "chat-only", "--scope", "llm-gateway.chat", "--stdout"))
+	collector := strings.TrimSpace(u.mustRunStdout("", "identity", "key", "create", "--name", "usage-collector", "--scope", "llm-gateway.usage.read", "--stdout"))
 	u.mustRunStdout("", "gateway-store", "stage", "--input", writeFile(t, "doc.json", gatewayDoc(t)), "--expected", "0", "--actor", "test")
 	u.mustRun("", "gateway-store", "activate", "--revision", "1", "--expected", "0", "--actor", "test")
 
@@ -258,9 +266,11 @@ func TestServedThroughTheTLSProxyName(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	status := "/api/llm-gateway/v1/management/status"
-	call := func(key, host string, proto ...string) int {
+	var callPath func(path, key, host string, proto ...string) int
+	call := func(key, host string, proto ...string) int { return callPath(status, key, host, proto...) }
+	callPath = func(path, key, host string, proto ...string) int {
 		t.Helper()
-		req, _ := http.NewRequest("GET", base+status, nil)
+		req, _ := http.NewRequest("GET", base+path, nil)
 		req.Header.Set("Authorization", "Bearer "+key)
 		req.Host = host
 		for _, p := range proto {
@@ -291,6 +301,25 @@ func TestServedThroughTheTLSProxyName(t *testing.T) {
 		if got := call(tc.key, tc.host, tc.proto...); got != tc.want {
 			t.Errorf("%s: %d, want %d", tc.name, got, tc.want)
 		}
+	}
+	// The usage monitor's collectors arrive the same way, with the key that holds only llm-gateway.usage.read.
+	export := "/api/llm-gateway/v1/usage/export"
+	for _, tc := range []struct {
+		name  string
+		key   string
+		proto []string
+		want  int
+	}{
+		{"collector key through the proxy name", collector, []string{"https"}, 200},
+		{"collector key, proxy header missing", collector, nil, 403},
+		{"chat-only key on the usage export", narrow, []string{"https"}, 403},
+	} {
+		if got := callPath(export, tc.key, public, tc.proto...); got != tc.want {
+			t.Errorf("%s: %d, want %d", tc.name, got, tc.want)
+		}
+	}
+	if got := callPath("/api/llm-gateway/v1/management/status", collector, public, "https"); got != 403 {
+		t.Errorf("the collector key on a management route: %d, want 403", got)
 	}
 	_ = cmd.Process.Signal(syscall.SIGTERM)
 	select {
@@ -384,4 +413,108 @@ func TestAmbientAuthPostureDoesNotWeakenEnforcement(t *testing.T) {
 	if left, _ := os.ReadDir(u.work); len(left) != 0 {
 		t.Errorf("the working directory is not empty after a run: %d entries", len(left))
 	}
+}
+
+// startedGateway runs the real binary on a throwaway data directory with one active revision whose only
+// provider is upstream, and returns the base URL. The caller stops nothing: the cleanup kills the process.
+func (u *unit) startedGateway(upstream string) string {
+	u.t.Helper()
+	u.mustRun(ownerPassphrase+"\n", "identity", "setup", "--username", "owner")
+	u.mustRunStdout("", "gateway-store", "stage", "--input", writeFile(u.t, "doc.json", gatewayDocAt(u.t, upstream)), "--expected", "0", "--actor", "test")
+	u.mustRun("", "gateway-store", "activate", "--revision", "1", "--expected", "0", "--actor", "test")
+	cmd := u.command("", "serve")
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		u.t.Fatal(err)
+	}
+	u.t.Cleanup(func() { _ = cmd.Process.Kill() })
+	base := "http://" + u.addr
+	for i := 0; ; i++ {
+		if r, err := http.Get(base + "/healthz"); err == nil {
+			_ = r.Body.Close()
+			return base
+		}
+		if i > 100 {
+			u.t.Fatalf("the binary never listened\n%s", stderr.String())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// The relay's clients depend on the upstream dialect's error bodies. The framework rewrites error bodies into its
+// flat {code, message} shape unless the path is declared raw, so this runs the real binary: an upstream
+// OpenAI-style error must come back byte for byte, the gateway's own relay errors keep their OpenAI shape, and
+// the framework's own refusals on the same paths (no key, no scope, unmapped route) stay flat.
+func TestRelayErrorsReachTheClientUntouchedAndFrameworkRefusalsStayFlat(t *testing.T) {
+	// Not canonical JSON on purpose (spacing, key order, a trailing newline): a decode and re-encode would change it.
+	const upstreamBody = "{\"error\": {\"message\": \"Unsupported  parameter: 'x'\", \"type\": \"invalid_request_error\", \"param\": \"x\", \"code\": \"unsupported_parameter\"}}\n"
+	var sawAuth string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Upstream-Marker", "kept")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, upstreamBody)
+	}))
+	defer up.Close()
+
+	u := newUnit(t, "")
+	base := u.startedGateway(up.URL + "/v1")
+	chat := strings.TrimSpace(u.mustRunStdout("", "identity", "key", "create", "--name", "chat", "--scope", "llm-gateway.chat", "--stdout"))
+	ops := strings.TrimSpace(u.mustRunStdout("", "identity", "key", "create", "--name", "ops", "--scope", "llm-gateway.management.read", "--stdout"))
+
+	do := func(method, path, key, body string) (int, http.Header, string) {
+		t.Helper()
+		req, _ := http.NewRequest(method, base+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if key != "" {
+			req.Header.Set("Authorization", "Bearer "+key)
+		}
+		res, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = res.Body.Close() }()
+		b, _ := io.ReadAll(res.Body)
+		return res.StatusCode, res.Header, string(b)
+	}
+	relay := "/api/llm-gateway/v1/chat/completions"
+	req := `{"model":"chat","messages":[{"role":"user","content":"hi"}]}`
+
+	// An upstream error arrives untouched: status, body bytes and headers; the caller's key was not forwarded.
+	code, hdr, body := do("POST", relay, chat, req)
+	if code != 400 || body != upstreamBody || hdr.Get("X-Upstream-Marker") != "kept" {
+		t.Errorf("upstream error = %d %q (marker %q), want 400 and the upstream bytes", code, body, hdr.Get("X-Upstream-Marker"))
+	}
+	if sawAuth != "Bearer not-a-real-upstream-key" {
+		t.Errorf("the upstream saw Authorization %q: the caller's key must be replaced by the provider key", sawAuth)
+	}
+	// The gateway's own relay error keeps the OpenAI shape (an unknown model).
+	code, _, body = do("POST", relay, chat, `{"model":"nope","messages":[]}`)
+	var own struct {
+		Error struct{ Message, Type, Code string } `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(body), &own); code != 404 && code != 400 || err != nil || own.Error.Message == "" {
+		t.Errorf("gateway-own relay error = %d %s, want an OpenAI-shaped {\"error\":{...}}", code, body)
+	}
+
+	// The framework's refusals on the same paths are flat: {code, message} and no nested error.
+	flat := func(name string, code int, body string, want int, wantCode string) {
+		t.Helper()
+		var f map[string]any
+		if err := json.Unmarshal([]byte(body), &f); err != nil || code != want {
+			t.Errorf("%s = %d %s, want %d flat", name, code, body, want)
+			return
+		}
+		if _, nested := f["error"]; nested || f["code"] == nil || f["message"] == nil || (wantCode != "" && f["code"] != wantCode) {
+			t.Errorf("%s = %s, want a flat {code, message} (code %q)", name, body, wantCode)
+		}
+	}
+	c, _, b := do("POST", relay, "", req)
+	flat("no key on a relay path", c, b, 401, "")
+	c, _, b = do("POST", relay, ops, req)
+	flat("a key without llm-gateway.chat", c, b, 403, "")
+	c, _, b = do("GET", "/api/llm-gateway/v1/nosuch", chat, "")
+	flat("an unmapped path under the relay prefix", c, b, 403, "route_not_mapped")
 }
