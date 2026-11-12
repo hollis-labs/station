@@ -13,9 +13,9 @@ https://gateway.example.test/api/llm-gateway/v1/management
 
 The Cerberus resource `station-llm-gateway` starts with
 `-gateway-db $HOME/.local/state/station/gateway/gateway.db`.
-SQLite owns gateway configuration and hashed client identities. The bootstrap
-`$HOME/.config/station/gateway/api.yaml` still owns listener/auth settings
-and other plugins. PostgreSQL remains the usage ledger; this cutover did not
+SQLite owns gateway configuration. Client keys are issued by the identity module
+(`/api/identity/keys`), not by this API. The bootstrap `SUBSTRATE_CONFIG` file owns
+listener and module settings. PostgreSQL remains the usage ledger; this cutover did not
 migrate or discard usage history.
 
 The host-local dedicated credential is
@@ -37,27 +37,18 @@ enforced authentication.
 
 | Scope | Grants |
 |---|---|
-| `llm-gateway.management.read` | Configuration, client metadata, status and history reads |
+| `llm-gateway.management.read` | Configuration, status and history reads |
 | `llm-gateway.management.write` | Configuration validation and staged edits |
 | `llm-gateway.management.activate` | Select a stored revision for the next service reload |
-| `llm-gateway.management.credentials` | Stage client issuance, scope edits, rotation and revocation |
 
 The existing `llm-gateway.*` and `*` wildcards include management authority.
 Ordinary app keys with chat/model-read scopes cannot use these routes. An operator
-can issue a dedicated management token with `station client issue -gateway-db`;
-activate its revision and reload before giving it to an integration.
-
-Credential managers must also hold every scope they grant or remove. For example,
-a manager issuing chat/model-read credentials needs those scopes in addition to
-`management.credentials`. They cannot grant a wildcard unless their own scope
-grant covers it. Activating a revision that changes client hashes or scopes also
-requires credential authority over the changed clients. This applies to rollback,
-which could otherwise restore an old privileged or revoked key.
+can issue a dedicated management key with `identity key create` (offline) or
+`POST /api/identity/keys`. No reload is needed for a key.
 
 Configuration write access is administrative: it controls upstream endpoints,
 secret references, local paths, policies and budgets. Give it only to trusted
-operator integrations. Client lifecycle scopes do not make arbitrary configuration
-editors into untrusted tenants. Stronger identity/approval patterns can later
+operator integrations. Configuration editors are not untrusted tenants. Stronger identity/approval patterns can later
 replace the verifier while retaining these route-level authorization boundaries.
 
 ## Revision and application contract
@@ -66,12 +57,12 @@ replace the verifier while retaining these route-level authorization boundaries.
 - **Selected revision:** durable selection for the next service startup.
 - **Running revision:** snapshot this process actually loaded at startup.
 
-GET configuration/resources/clients defaults to the latest revision. Add
+GET configuration and resources default to the latest revision. Add
 `?revision=ID` to inspect an older snapshot. Read responses include `revision` and
-an `ETag`, such as `"12"`. Configuration writes and client mutations must send
+an `ETag`, such as `"12"`. Configuration writes must send
 that latest revision's ETag as `If-Match`. They return **201**, a new ETag and
 `{"revision":13,"state":"staged"}`. The edit preserves other parts of the
-document, including client credentials when editing configuration.
+document.
 
 `GET /status` returns an ETag for the **selected** revision, plus:
 
@@ -98,9 +89,8 @@ An operator then runs `station validate -api-only -api-config /private/api.yaml
 -gateway-db /private/gateway.db`, reloads the service through Cerberus, and checks
 `/status` again. Show a change as applied only when the running revision matches
 the intended selected revision. If validation fails, select the previous working
-revision before reloading. Credential issuance/revocation also takes effect on
-reload; existing credentials and in-flight requests keep their old authority
-until then.
+revision before reloading. Keys issued or revoked through the identity module take effect at once and do not
+need a reload.
 
 A stale `If-Match` returns **412** without writing anything. Read the new state
 and reconcile the edit; do not blindly retry it with the newest revision number.
@@ -119,19 +109,14 @@ trailing JSON and null resource bodies are rejected. Configuration documents use
 | Method | Path | Body / result |
 |---|---|---|
 | GET | `/status` | Latest, selected and running revisions; reload state |
-| GET | `/config` | `{revision, schema_version, gateway}`; no client hashes |
+| GET | `/config` | `{revision, schema_version, gateway}` |
 | PUT | `/config` | `{schema_version: 1, gateway: {...}}`; replaces gateway settings atomically |
 | POST | `/validate` | Same body as config PUT; validates without saving or contacting providers |
 | GET / PUT | `/providers` | `{providers: [...]}` on PUT; GET also includes revision/schema version |
 | GET / PUT | `/models` | `{models: [...]}`; includes ordered targets/fallbacks |
 | GET / PUT | `/policy` | `{policy: {...}}`; rules retain their supplied order |
 | GET / PUT | `/budgets` | `{budgets: [...]}`; `[]` clears budgets explicitly |
-| GET | `/clients` | `{revision, clients: [{id, scopes}]}`; hashes and tokens omitted |
-| POST | `/clients` | `{id, scopes}`; issue a new identity and return its token once |
-| PUT | `/clients` | `{id, scopes}`; change an existing identity's scopes, preserving its token |
-| POST | `/clients/rotate` | `{id}`; replace the existing token, preserving its scopes |
-| DELETE | `/clients?id=ID` | No body; stage revocation of an existing identity |
-| GET | `/revisions` | Immutable revision metadata; no document or credential hashes |
+| GET | `/revisions` | Immutable revision metadata; no document |
 | GET | `/activations` | Selection audit: actor, time, previous revision and selected revision |
 | POST | `/activate` | `{revision: ID}`; select for the next reload, as described above |
 
@@ -147,15 +132,11 @@ deleting all providers is rejected. Empty collection reads use `[]`.
 
 History routes accept `?before=ID&limit=N` (1–100, default 100). They return
 `{items, next_before}`. A nonzero cursor can lead to an empty final page. Revision
-metadata has a document checksum, not a client credential hash. Secret reference
+metadata has a document checksum. Secret reference
 names and environment variable names are visible in configuration; resolved
 provider secrets are never returned.
 
-Client issuance and rotation add `client: {id, scopes}` and `token` to the staged
-response. Store the token immediately using a private file/secret store. It cannot
-be retrieved later. If the response is lost, inspect the client list and rotate;
-retrying issuance for an existing identity returns **409**. Requests and responses
-are not logged, and all management responses carry `Cache-Control: no-store`.
+Requests and responses are not logged, and all management responses carry `Cache-Control: no-store`.
 
 Validation returns `valid: true`, `validation: "configuration_only"` and
 `runtime_checked: false`. It checks the same typed configuration rules as the
@@ -223,7 +204,7 @@ already installed artifact, or `deploy` when source changed. Check the actual
 management running revision after either operation.
 
 `scripts/gateway-management-smoke.py --base-url BASE --token-file FILE` checks
-the authenticated status/config/history reads, absence of credential hashes,
+the authenticated status/config/history reads, absence of the legacy `clients` field,
 missing-token denial and pure configuration validation. It makes no edits,
 activations or inference calls. The token needs management read and write
 (validation) scopes. It prints only check names, status and pass/fail results.
@@ -232,13 +213,12 @@ Use `scripts/gateway-smoke.py` separately to verify inference after deployment.
 | Status | Meaning |
 |---|---|
 | 400 | Malformed JSON, unknown fields, invalid ETag or query parameters |
-| 401 / 403 | Missing/invalid bearer credential or insufficient scope/credential authority |
-| 404 | Requested client or stored revision does not exist |
-| 409 | Client identity already exists |
+| 401 / 403 | Missing/invalid bearer credential or insufficient scope |
+| 404 | Requested stored revision does not exist |
 | 412 / 428 | Stale / missing revision precondition |
 | 413 / 415 | Body too large / unsupported content type |
-| 422 | Invalid typed configuration or client definition |
-| 503 | Store or credential-generation failure; no successful write is claimed |
+| 422 | Invalid typed configuration, or a document that names clients |
+| 503 | Store failure; no successful write is claimed |
 
 Management handler errors use `{error: {code, message, request_id}}`. Authentication
 failures may use the shared auth library's envelope. `X-Request-Id` is available

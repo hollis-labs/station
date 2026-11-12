@@ -90,8 +90,6 @@ def main():
                  for k in ("latest_revision", "selected_revision", "running_revision")))
     config = call("configuration", "/config", check=lambda v: v.get("schema_version") == 1
                   and isinstance(v.get("gateway"), dict) and "clients" not in v)
-    call("client metadata", "/clients", check=lambda v: isinstance(v.get("clients"), list)
-         and all(set(c) == {"id", "scopes"} for c in v["clients"]))
     for resource in ("providers", "models", "policy", "budgets"):
         call(resource, "/" + resource, check=lambda v, key=resource: key in v and "revision" in v)
     for resource in ("revisions", "activations"):
