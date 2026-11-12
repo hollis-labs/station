@@ -527,3 +527,17 @@ repository (the `station-operator` client holds `llm-gateway.*` and could call t
   (names and holders pending from the driver).
 - **Relay gate.** The relay routes stay unreachable in every build (`relayWired` false) until a test proves an upstream
   OpenAI error arrives byte for byte and a framework refusal arrives flat.
+
+## Rehearsal on the live online-backup copies (2026-11-12, scratch directories, copies of the copies)
+
+Method: each run takes a fresh `.backup` of the driver's copy, an empty data directory, then `migrate-from`. Content is
+proved by the command's in-transaction digest and `integrity_check`, then independently by SQL `EXCEPT` in both directions
+on every table (column lists from the old schema) and by comparing `sqlite_sequence`.
+
+| Unit | Rows copied | EXCEPT old-new / new-old | Sequences | Pause (3 runs, wall time of `migrate-from`) |
+|---|---|---|---|---|
+| usage-monitor (47,456,256 B) | accounts 11, account_audit 24, observations 84,697, events 67 | 0 / 0 on all four tables | audit 24, observations 84,697, events 67, equal | 2.40 s, 2.57 s, 2.44 s |
+| llm-gateway (131,072 B) | revisions 10, state 1, activations 9, usage 0; latest and active revision 10 | 0 / 0 on all four tables | revisions 10, activations 9, equal | 0.06 s, 0.06 s, 0.04 s |
+
+The pause for a cutover is the migration time plus the old unit's stop and the new unit's start; the migration itself is
+under three seconds on the live data. The driver's copies were only read; the scratch copies were deleted afterwards.
