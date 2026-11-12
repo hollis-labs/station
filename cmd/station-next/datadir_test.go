@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -8,6 +9,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/spf13/pflag"
+
+	"github.com/hollis-labs/substrate/boot"
 
 	"github.com/hollis-labs/station/internal/appdirs"
 )
@@ -113,4 +118,27 @@ func TestReadOnlyCommandsCreateNothing(t *testing.T) {
 	if len(entries(home)) == 0 {
 		t.Fatal("control: secret set wrote nothing, so the emptiness check proves nothing")
 	}
+}
+
+// plan treats every argument that does not start with "-" as a command word, which is right only
+// while no root-level flag takes a value. Fails when one is added.
+func TestRootHasNoValueFlags(t *testing.T) {
+	t.Setenv("STATION_DATA_DIR", filepath.Join(t.TempDir(), "data"))
+	t.Setenv("SUBSTRATE_CONFIG", "")
+	modules, prepare := plan([]string{"validate"})
+	run, err := boot.StartWith(context.Background(), substrateApp, modules, substrateConfigJSON, boot.Options{AfterConfig: afterConfig(os.Getenv, prepare)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer run.Stop(context.Background()) //nolint:errcheck
+	root := (&station{app: run.App}).root(context.Background(), nil)
+	check := func(fs *pflag.FlagSet) {
+		fs.VisitAll(func(f *pflag.Flag) {
+			if f.Value.Type() != "bool" {
+				t.Errorf("root flag --%s takes a value (%s); plan() would read its value as the command word, teach it first", f.Name, f.Value.Type())
+			}
+		})
+	}
+	check(root.Flags())
+	check(root.PersistentFlags())
 }

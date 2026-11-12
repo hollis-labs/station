@@ -67,6 +67,11 @@ func afterConfig(getenv func(string) string, prepare bool) boot.Hook {
 // other command, including validate, list, secret check and help, reads configuration and starts
 // no module that opens a file, so running one without STATION_DATA_DIR cannot touch the live
 // directory of the app name.
+//
+// Every argument that does not start with "-" counts as a command word. That is right only while
+// the root command has no global flag that takes a value (today its one flag is -h/--help):
+// `--level debug serve` would read "debug" as the command. TestRootHasNoValueFlags fails when
+// such a flag is added, and then plan must learn it.
 func plan(args []string) (modules []string, prepare bool) {
 	var words []string
 	for _, a := range args {
@@ -89,7 +94,7 @@ func plan(args []string) (modules []string, prepare bool) {
 }
 
 var (
-	readOnly    = []string{"config", "logging", "cli"}
+	readOnly    = []string{"config", "logging", "health", "cli"}
 	withSecrets = []string{"config", "logging", "secrets", "cli"}
 )
 

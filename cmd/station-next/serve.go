@@ -111,7 +111,7 @@ func (s *station) serve(ctx context.Context) error {
 	id := identity.From(app)
 	resolver := secrets.Resolver(app)
 	if id == nil || resolver == nil {
-		return errors.New("the identity and secrets modules must be started")
+		return errors.New("serve needs every module, but the command line was read as another command: serve must be the first word, and global flags that take a value are not supported")
 	}
 	h, err := host.Start(ctx, app.Name, cfg.MCP, resolver, auth.ScopeTable(app), health.From(app), slog.Default())
 	if err != nil {

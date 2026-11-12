@@ -1,8 +1,13 @@
-// Package hostguard keeps Basalisk answering only to the names it is meant to have. The
-// backend binds loopback; a browser pointed at it from another site (DNS rebinding) arrives
+// Package hostguard keeps the service answering only to the names it is meant to have.
+//
+// This is a copy of hollis-labs/basalisk internal/hostguard at fdd5931, taken as it is (the code
+// is unchanged; only this comment names Station) because Substrate has no shared one yet. When the
+// framework gains the check, this file is replaced by it.
+//
+// The backend binds loopback; a browser pointed at it from another site (DNS rebinding) arrives
 // with a Host the app does not serve, and is refused before any handler sees it.
 //
-// Served Hosts are loopback names and addresses, plus an operator list (basalisk.allowed_hosts)
+// Served Hosts are loopback names and addresses, plus an operator list (station.allowed_hosts)
 // for a local TLS proxy that forwards a public name. A request for a listed name is believed
 // only when it comes from a loopback peer carrying exactly one X-Forwarded-Proto: https. Every
 // other forwarding header is dropped, because none of them may choose the host, origin or

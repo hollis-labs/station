@@ -35,12 +35,18 @@ func run(ctx context.Context, getenv func(string) string, args []string) error {
 	defer func() { _ = started.Stop(context.Background()) }()
 
 	s := &station{app: started.App}
-	rootCmd := cli.Root(started.App)
+	rootCmd := s.root(ctx, args)
+	return rootCmd.ExecuteContext(ctx)
+}
+
+// root is the command tree: the framework's skeleton plus Station's commands. `station` with no
+// command serves, like `station serve`.
+func (s *station) root(ctx context.Context, args []string) *cobra.Command {
+	rootCmd := cli.Root(s.app)
 	rootCmd.SetArgs(args) // the same words plan() looked at
 	serve := s.serveCmd(ctx)
-	// `station` with no command serves, like `station serve`.
 	rootCmd.RunE = func(c *cobra.Command, args []string) error { return serve.RunE(c, args) }
 	rootCmd.Args = cobra.NoArgs
 	rootCmd.AddCommand(serve, s.listCmd(), s.validateCmd(), s.secretCmd())
-	return rootCmd.ExecuteContext(ctx)
+	return rootCmd
 }
