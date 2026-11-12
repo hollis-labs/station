@@ -53,6 +53,14 @@ Survey only, no code converted. Data is in use: it is migrated, never moved asid
     carries a header the handler sets), or a scoping rule (normalize only the framework's own routes). Until then the
     gateway's relay routes cannot serve OpenAI clients faithfully through `httphost`.
 
+    A `Raw` flag on `Mount` alone would not be enough for the gateway as it is served today. Clients call
+    `/api/llm-gateway/v1/chat/completions`, `/v1/messages` and the rest under `/api/llm-gateway`, and
+    `httphost.checkMount` refuses any mount at or under `/api`, `/healthz` or `/mcp`. Either the opt-out has to
+    reach routes registered through `Options.Routes` (a per-route flag, or the mux wrapped in a marker the
+    normalizer honours), or the relay moves to a mount outside `/api` (for example `/llm-gateway/v1/...`), which
+    changes the base URL of every gateway client. Station has no preference between the two beyond the first not
+    changing any client; it is the framework's call.
+
 ## Client list (live facts via the driver, read-only; ids and scopes only)
 
 | Client | Surface | Auth today | Scope today |
