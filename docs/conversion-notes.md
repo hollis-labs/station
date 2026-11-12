@@ -648,3 +648,8 @@ password reference).
 `bearer_tokens`: nothing authenticates callers of those two mounts today. After the port each caller needs an identity key with
 `station.design-suite` or `station.tripo`; the callers are the Tether gateway's `design_*` and `tripo_*` entries (the driver routes
 that change at cutover) and anything else the docs name.
+
+## Pin da9f59b (2026-11-12)
+
+Substrate main da9f59b: the BOM pins libs security/auth v0.3.1 (message text fix) and the Go floor is 1.26.11 (GO-2026-6859).
+Station's `go.mod` follows (own commit); generated wiring did not change. The Substrate pin before this was d453ac8.
