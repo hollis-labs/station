@@ -4,6 +4,18 @@ All notable user-facing changes land here.
 
 ## Unreleased
 
+### Changed (breaking)
+
+- Station runs on the Substrate framework as three binaries: `station` (the MCP host), `llm-gateway` and `usage-monitor`. The single
+  `station serve -api-only ...` daemon, the `platform/` plugin layer and the `plugins/` tree are removed.
+- Authentication is identity API keys issued by each unit (`<unit> identity key create`); the client-key YAML files, the gateway
+  database's client hashes, `station client`, the `/clients` management routes and per-server `bearer_tokens` are removed.
+- Errors from the management and usage APIs are the flat `{code, message}` shape; relay errors keep the provider's own shape.
+- Gateway configuration and the SQLite ledger live in the unit's database (`llm-gateway.db`); the usage monitor's data is
+  `usage-monitor.db`. `llm-gateway gateway-store migrate-from` and `usage-monitor migrate-from` copy the previous files.
+- Push sources in the usage monitor are bound to `key:<id>` principals. `ledger.sqlite.path` and `database:` config keys are gone.
+- `docs/cutover-plan.md` is the live move; nothing is deployed by merging.
+
 ### Fixed
 
 - `station serve` now resolves `keychain://` references in a process-mode server's `env` from the same `secrets` store that `station secret set` and `station secret check` use, falling back to the older api-projection credential store for references provisioned there. Before, a key stored with `station secret set` passed `station secret check` but made `station serve` exit with "resolved to an empty value".

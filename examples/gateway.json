@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "gateway": {
+    "providers": [
+      {"id": "openai-work", "dialect": "openai", "base_url": "https://api.openai.com/v1", "api_key_ref": "keychain://openai/work"}
+    ],
+    "models": [
+      {"name": "chat", "targets": [{"provider": "openai-work", "model": "gpt-4o-mini"}]}
+    ],
+    "catalog": {"refresh": false, "warmup": false}
+  }
+}

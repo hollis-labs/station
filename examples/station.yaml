@@ -1,0 +1,18 @@
+# Override file for the MCP host (cmd/station): point SUBSTRATE_CONFIG at a private copy of this file.
+# Logical servers keep the libs mcp-host schema. There are no per-server bearer_tokens: callers present an
+# identity API key whose scope is station.<server id> (see docs/cutover-plan.md, "Callers").
+httphost:
+  addr: "127.0.0.1:8097"
+station:
+  allowed_hosts: []        # names served besides loopback, for a local TLS proxy
+  logical_servers:
+    - id: avatar
+      name: Avatar
+      transport: process
+      process:
+        command: /absolute/path/to/the/server
+        args: []
+        env:
+          # A reference, never a value: store it with `station secret set keychain://avatar/setting`.
+          AVATAR_SETTING: "keychain://avatar/setting"
+      serve: {http: {path: /avatar}}

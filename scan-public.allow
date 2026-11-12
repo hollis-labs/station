@@ -3,6 +3,4 @@
 # Credential references, not credentials: <NAME>_TOKEN: keychain://... names an entry in a secret
 # store; the value never appears in the repository.
 secret-assignment internal/secretref/resolve_test.go test fixture: a keychain:// reference as a child's env value, not a credential
-secret-assignment station.yaml starter config: GITHUB_TOKEN is set to a keychain:// reference resolved at start, not a credential
-agent-box-host deploy.yaml fleet inventory alias required by fleet-deploy/v1, not an address
-agent-box-host deploy/*.yaml fleet inventory alias required by fleet-deploy/v1, not an address (the per-app descriptors; same reason as deploy.yaml)
+agent-box-host deploy/*.yaml fleet inventory alias required by fleet-deploy/v1, not an address (the per-app descriptors)

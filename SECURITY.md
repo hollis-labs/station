@@ -16,7 +16,7 @@ through a contact channel published on the Hollis Labs organization or
 maintainer profile. Include:
 
 - the affected commit and operating system
-- the `-http-addr` in use and which logical servers `station.yaml` exposes
+- the unit and its `httphost.addr`, and which logical servers its configuration exposes
 - reproduction steps and the security impact
 - whether credentials or private records may have been exposed
 - a safe way to contact you about coordination
@@ -26,42 +26,37 @@ disclosure; response times are best effort during the pre-release period.
 
 ## Deployment boundary
 
-Station hosts MCP servers over stdio and HTTP. As shipped, the HTTP endpoints in
-`station.yaml` are **unauthenticated** (`bearer_tokens: []`).
+Station is three binaries (the MCP host, the LLM gateway, the usage monitor). Each is its own identity provider and runs with
+authentication enforced.
 
-- `station serve` defaults to `-http-addr :8080` in the README examples, which
-  binds **all interfaces**. Run `station -http-addr 127.0.0.1:8080` unless you
-  have your own access control in front.
-- Set `bearer_tokens` on any endpoint before serving beyond loopback.
-- There is no built-in TLS. Use a trusted TLS-terminating proxy, VPN or SSH
-  tunnel for remote access.
-- A plugin's tools are only as private as the data behind them. For example the
-  Atlas server (now in `station-plugins`) serves **`visibility:private`**
-  records; `visibility` is a label, not access control, and Tesseract fences
-  nothing under `project/*`. Read each plugin's README before exposing it.
-- Station spawns the plugin processes `station.yaml` names, with the authority
-  of the user running it. Treat the config file as executable configuration.
+- Every route except `/healthz` needs an identity API key whose scopes cover the route; a route no scope maps is refused. There are
+  no shared bearer tokens and no unauthenticated mounts.
+- Each unit refuses to listen on anything but a loopback address. A local TLS proxy's public name is served only when it is listed in
+  the unit's `allowed_hosts`, the peer is loopback and the request carries exactly one `X-Forwarded-Proto: https`; other forwarding
+  headers are dropped. There is no built-in TLS: terminate it in a trusted proxy.
+- Owner setup is offline only (`<unit> identity setup`); `POST /api/setup` is refused.
+- A logical server's tools are only as private as the data behind them. `visibility` is a label, not access control. Station
+  spawns the processes its configuration names with the authority of the user running it: treat the configuration as executable.
+- The relay passes an upstream provider's error bodies to the caller unchanged; it does not forward the caller's key upstream.
 
 ## Data at rest
 
-Station keeps no database of its own; any data a plugin holds is described in
-that plugin's README.
+Each unit keeps one data directory (database, signing key, secrets state), private to the user (mode 0600/0700). The gateway
+stores revisions that hold secret *references* (never values) and key hashes; the usage monitor stores observations. The
+gateway ledger is SQLite in that database or PostgreSQL with separate runtime and migration logins.
 
-Credentials: prefer `keychain://…` references in `station.yaml` and environment
-variables over literal values, and do not commit tokens.
+Credentials are references (`keychain://...`, `file://...`) resolved when needed and registered with the log redactor. Do not
+commit values or paste them into arguments; `<unit> secret set` reads stdin.
 
 ## External data processors
 
-Station makes no outbound calls of its own beyond the upstreams you configure:
-any API a plugin such as `github-pilot` is pointed at.
-Data sent there is governed by those services.
+Station makes no outbound calls beyond the upstreams you configure: the LLM providers a gateway revision names, the provider usage
+endpoints the usage monitor's collectors call, and the MCP servers' own dependencies. Data sent there is governed by those services.
 
 ## Current security limitations
 
-- shipped HTTP endpoints are unauthenticated by default
-- README examples bind all interfaces
 - no built-in TLS
+- a process running as the unit's user can read the unit's data directory and its keyring entries
 - pre-release: interfaces and behavior change without notice
 
-These are deployment constraints, not hidden roadmap promises. Operate within
-them or place Station behind controls that provide the missing boundary.
+These are deployment constraints. Operate within them or place Station behind controls that provide the missing boundary.

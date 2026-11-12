@@ -1,79 +1,59 @@
 # Station
 
-Station is a prototype built on `github.com/hollis-labs/libs/mcp/plugin-mcp/mcp-host` (the
-generic dual-transport MCP plugin host library). Station itself stays thin — see `README.md` for the package
-map — and defers everything host-shaped to the library.
+Station is Hollis Labs' MCP host and LLM gateway, built on the Substrate framework. One Go module builds three
+binaries that run as four units:
+
+| Binary | Units | What it is |
+|---|---|---|
+| `cmd/station` | avatar-station, design-station | The libs `mcp-host` engine inside a Substrate service: process-mode logical servers served over HTTP |
+| `cmd/llm-gateway` | llm-gateway | OpenAI- and Anthropic-compatible relay with a ledger, budgets, policy and a management API |
+| `cmd/usage-monitor` | usage-monitor | Collects and serves provider usage (pull collectors and authenticated push) |
 
 ## Where Station is
 
-Not released, not deployed, no consumers. It is a public prototype, built in
-the open to prove `mcp-host` is feature-complete enough to build on. Interfaces
-can change without notice.
+In daily use on the Hollis Labs fleet host, with real data (gateway revisions and usage history). The port to Substrate
+is in review; the live units still run the previous build until the cutover in `docs/cutover-plan.md`, which the owner
+approves. A change must not make that cutover riskier: data, credentials and anything that can silently lose work get
+the real treatment.
 
-Being pre-release does not license skipping verification: data integrity,
-security boundaries and anything that can silently lose work still get the real
-treatment.
+## Start here
 
-## Start Here
-
-- `README.md` covers the quickstart, config, and package map.
-- `cmd/station/main.go` is the entire binary — read it before adding
-  anything to `main`, since it should stay a thin wrapper around
-  `mcphost.Run`, not grow its own host logic.
-- The `mcp-host` repository's `README.md` and `AGENTS.md` (github.com/hollis-labs/libs/mcp/plugin-mcp/mcp-host)
-  own everything about the host itself:
-  config schema, transport modes, known gaps. Read those before assuming
-  a limitation is Station's to fix.
+- `docs/architecture.md` explains the layout; `docs/conversion-notes.md` records what changed, the gaps found, and the
+  evidence; `docs/cutover-plan.md` is the live move.
+- `internal/appboot` is the shared boot path (database guard, module sets, offline command plan); each `cmd/*/main.go`
+  is thin around it. `internal/llmgateway` and `internal/usagemonitor` hold the services; `internal/hostguard` is the
+  Host-header and proxy-header guard (kept until the framework has one).
+- Pins live in Substrate's BOM. Never edit versions in `go.mod` by hand: `go run github.com/hollis-labs/substrate/cmd/substrate pins check --app .`
 
 ## Commands
 
 ```bash
 gofmt -l .
 go vet ./...
+go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run ./...
 go test -race -count=1 ./...
+go run github.com/hollis-labs/substrate/cmd/substrate pins check --app .
+go run github.com/hollis-labs/substrate/cmd/substrate scan-public --tree
 ```
 
-There is no CI workflow and no Makefile in this repo, so these are the only
-gate (same convention as `mcp-host` and `go-mcp`).
+The tests build and run the real binaries on throwaway data directories. Postgres ledger tests skip unless
+`STATION_TEST_PG_DSN` names a **throwaway** database (they truncate `llm_calls`); with several packages sharing it use
+`go test -p 1`. Never point it at the live ledger.
 
-`go test ./...` builds the real `station` binary and both real plugin
-binaries via `go build`, then drives them as subprocesses with a genuine
-MCP client, killing and confirming recovery of each — expect it to take
-several seconds and spawn/kill real processes; that's the point, not a
-flake.
+## Rules that are easy to break
 
-## Boundaries
+- Every run of a binary uses an explicit data directory in tests (`STATION_DATA_DIR`, `LLM_GATEWAY_DATA_DIR`,
+  `USAGE_MONITOR_DATA_DIR`); the default is the live one. Tests also run from an empty working directory and with HOME and
+  XDG redirected. `secret set` against a real session bus writes to the real keyring: unset `DBUS_SESSION_BUS_ADDRESS`
+  when trying commands by hand.
+- All three binaries refuse a non-loopback `httphost.addr` (`hostguard.RequireLoopbackBind`) before listening, and serve other
+  Host names only from a loopback peer with exactly one `X-Forwarded-Proto: https`.
+- The database module's store has one write connection: reads through `Reader()`, writes through `WriteTx` (callbacks must be
+  re-runnable), never a statement inside an open cursor.
+- The relay prefix `/api/llm-gateway/v1/` is declared raw (`httphost.Options.RawPrefixes`): upstream error bodies reach clients
+  untouched. Do not add framework-owned behaviour on that prefix without the error-shape test.
+- MCP is the agent-facing interface for the MCP host; the CLI is the operator surface. Do not add MCP tools or HTTP
+  management for operating Station itself. `serve.stdio` stays refused.
+- The old gateway/usage database files are never written by the new build: `migrate-from` reads a copy.
 
-`go.mod` requires the real, published `github.com/hollis-labs/libs/mcp/plugin-mcp/mcp-host`
-(`mcp/plugin-mcp` `v0.4.0`) — no `replace` directive. There is no tracked or ambient
-`go.work`; both `mcp-host` and this repo now have real tags, so cross-module
-development against an unreleased `mcp-host` change is a throwaway
-`go.work` outside the repos, never a
-`replace`, never a tracked workspace file. Bumping the `mcp-host` version
-here should follow a real tag on that repo, not a local, untagged change.
-
-MCP is the only agent-facing interface. `cmd/station`'s
-`validate`/`list`/`version` subcommands are an ops/inspection surface, not
-a second agent API; don't add MCP tools (or an HTTP management API) for
-operating Station itself (listing/adding/restarting logical servers). If
-that need ever becomes real, prefer extending the CLI over adding an MCP tool.
-
-Station should not reimplement anything `mcp-host` already owns —
-config parsing, the transport interface, supervision, serving. If a change
-here starts looking like host logic (a new transport mode, a new way to
-expose a logical server, config schema changes), it almost certainly
-belongs in the library instead, as a change that benefits every future
-consumer, not just Station.
-
-`plugins/echo-server` and `plugins/clock-plugin` are demonstration
-starters, not Station's real product surface — don't read them as evidence
-of what Station is "for." They exist to prove the library works
-end-to-end, mirroring the library's own `examples/plugins/` (which Station
-does not depend on; these are Station's own copies, since a real
-consumer's product tools shouldn't live inside the library's example
-code).
-
-Atlas moved to `station-plugins` (`atlas-server`); Station keeps only the echo and clock starters here.
-
-Open a pull request for changes; a maintainer will review it. See
-`CONTRIBUTING.md`.
+Open a pull request for changes; see `CONTRIBUTING.md`.

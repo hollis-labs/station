@@ -1,9 +1,8 @@
 # LLM gateway management API
 
-This API edits the SQLite gateway state introduced in PR #9. It is enabled only
-when Station starts with `-gateway-db /absolute/private/gateway.db`. YAML-only
-deployments keep serving inference without management routes. The database must
-already have a selected revision; see the README's SQLite import instructions.
+This API edits the gateway state held in the unit's database (`llm-gateway.db` in its data directory). The service needs an active
+revision to start: stage and activate one with `llm-gateway gateway-store` (see `examples/gateway.json`); a previous build's
+`gateway.db` is copied in once with `llm-gateway gateway-store migrate-from`.
 
 Base URL on the dogfood host, enabled and verified on 2026-10-18:
 
@@ -11,8 +10,7 @@ Base URL on the dogfood host, enabled and verified on 2026-10-18:
 https://gateway.example.test/api/llm-gateway/v1/management
 ```
 
-The Cerberus resource `station-llm-gateway` starts with
-`-gateway-db $HOME/.local/state/station/gateway/gateway.db`.
+The Cerberus resource `station-llm-gateway` runs `llm-gateway serve` with `LLM_GATEWAY_DATA_DIR` set in its drop-in.
 SQLite owns gateway configuration. Client keys are issued by the identity module
 (`/api/identity/keys`), not by this API. The bootstrap `SUBSTRATE_CONFIG` file owns
 listener and module settings. PostgreSQL remains the usage ledger; this cutover did not
@@ -100,8 +98,7 @@ service, test provider credentials or prove that a future startup will succeed.
 It only validates the stored document and commits the selection and audit record.
 It can select an older revision for rollback.
 
-An operator then runs `station validate -api-only -api-config /private/api.yaml
--gateway-db /private/gateway.db`, reloads the service through Cerberus, and checks
+An operator then runs `llm-gateway validate` (with the unit's `SUBSTRATE_CONFIG` and `LLM_GATEWAY_DATA_DIR`), restarts the unit, and checks
 `/status` again. Show a change as applied only when the running revision matches
 the intended selected revision. If validation fails, select the previous working
 revision before reloading. Keys issued or revoked through the identity module take effect at once and do not
@@ -213,10 +210,8 @@ remain a separate PostgreSQL concern. On this host, the private
 snapshot and verification records. Treat snapshots as sensitive: old revisions
 can restore revoked identities, and their hashes and secret references are private.
 
-Cerberus `reload` restarts the existing service definition. When changing launch
-arguments such as `-gateway-db`, use `apply` to update that definition with the
-already installed artifact, or `deploy` when source changed. Check the actual
-management running revision after either operation.
+A restart picks up the newly activated revision (keys do not need one). When the unit definition changes (the drop-in in
+`deploy/llm-gateway.yaml`), the installer applies it. Check the actual management running revision after either operation.
 
 `scripts/gateway-management-smoke.py --base-url BASE --token-file FILE` checks
 the authenticated status/config/history reads, absence of the legacy `clients` field,

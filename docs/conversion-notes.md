@@ -1,5 +1,10 @@
 # Conversion notes: Station onto Substrate (draft)
 
+> **Cleanup branch (`feat/substrate-cleanup`).** This file is the record of the port as it was done. The old `cmd/station`,
+> `platform/`, `plugins/` and `ledger_compat_test.go` are removed there, `cmd/station-next` is now `cmd/station`, CI lint covers
+> `./...`, and the root `deploy.yaml` is gone (CI copies `deploy/<app>.yaml` over it). Where the text below says `cmd/station-next`
+> or describes the old code as present, read the new names. The cutover is in `docs/cutover-plan.md`.
+
 Survey only, no code converted. Data is in use: it is migrated, never moved aside, never deleted.
 
 ## Gaps
@@ -349,7 +354,7 @@ repository) reports 55 issues: 49 errcheck, 4 staticcheck, 2 unused. All are in 
 are existing debt, not from this port, and they are deliberately not fixed in code that is about to be deleted. CI lints
 only the new code (`./cmd/station-next/...`, `./cmd/llm-gateway/...`, `./cmd/usage-monitor/...`, `./internal/...`, 0 issues).
 
-## What the last port must do
+## What the last port must do (done on `feat/substrate-cleanup`)
 
 - Delete `cmd/station`, `platform/` and `plugins/` once their roles live in `cmd/llm-gateway`, `cmd/usage-monitor` and
   the MCP host, and rename `cmd/station-next` to `cmd/station` (and `/station-next` in `.gitignore`).

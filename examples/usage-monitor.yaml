@@ -1,0 +1,30 @@
+# Override file for usage-monitor: point SUBSTRATE_CONFIG at a private copy of this file.
+# Account definitions seed new accounts only; later edits use the API. Disabled accounts make it safe to
+# validate before credentials are connected. Keys come from `usage-monitor identity key create`.
+httphost:
+  addr: "127.0.0.1:18083"
+identity:
+  trusted_proxy: true      # only when a local TLS proxy forwards the public name
+usage-monitor:
+  allowed_hosts: [usage.example.test]
+  poll_interval: 5m
+  stale_after: 15m
+  accounts:
+    - {id: claude-personal, provider: anthropic, kind: subscription, label: Claude, enabled: false}
+    - {id: openai-api, provider: openai, kind: api, label: OpenAI API, enabled: false}
+  sources:
+    - id: claude-oauth
+      account_id: claude-personal
+      collector: claude
+      credential_ref: file:///private/claude/.credentials.json
+      credential_format: claude
+    - id: gateway-openai
+      account_id: openai-api
+      collector: gateway
+      gateway_url: https://gateway.example.test/api/llm-gateway
+      # a gateway key holding only llm-gateway.usage.read (created with llm-gateway identity key create)
+      credential_ref: file:///private/station/usage/gateway-usage.token
+    - id: laptop-claude
+      account_id: claude-personal
+      collector: push
+      principal: key:k_REPLACE_WITH_THE_REPORTERS_KEY_ID   # the key id from GET /api/identity/keys
