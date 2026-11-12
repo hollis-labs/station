@@ -1,12 +1,5 @@
-// Command echo-server is one of Station's two starter virtual MCPs: a
-// real, standalone MCP server speaking the protocol itself over stdio,
-// with no dependency on Station or mcp-host — it doesn't know it will
-// typically be spawned and supervised as a process-mode logical server
-// (see ../../station.yaml).
-//
-// A process-mode starting point: replace this tool with whatever
-// Station's first real capability turns out to be, in any language,
-// reached over stdio or HTTP.
+// Command echo-server is a test fixture: a real, standalone MCP server speaking the protocol itself over stdio,
+// with no dependency on Station or mcp-host. The tests spawn and supervise it as a process-mode logical server.
 package main
 
 import (

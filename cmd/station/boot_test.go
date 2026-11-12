@@ -33,7 +33,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	echoBin = filepath.Join(dir, "echo-server")
-	if out, err := exec.Command("go", "build", "-o", echoBin, "github.com/hollis-labs/station/plugins/echo-server").CombinedOutput(); err != nil {
+	if out, err := exec.Command("go", "build", "-o", echoBin, "github.com/hollis-labs/station/cmd/station/testdata/echo-server").CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "build echo-server: %v\n%s", err, out)
 		os.Exit(2)
 	}

@@ -84,7 +84,7 @@ func TestChildCrashIsSupervised(t *testing.T) {
 // within the grace period.
 func TestLongResponseOutlivesHeaderTimeout(t *testing.T) {
 	fake := filepath.Join(t.TempDir(), "fakechild")
-	if out, err := exec.Command("go", "build", "-o", fake, "github.com/hollis-labs/station/cmd/station-next/testdata/fakechild").CombinedOutput(); err != nil {
+	if out, err := exec.Command("go", "build", "-o", fake, "github.com/hollis-labs/station/cmd/station/testdata/fakechild").CombinedOutput(); err != nil {
 		t.Fatalf("build fakechild: %v\n%s", err, out)
 	}
 	base, stop := startedWith(t, fmt.Sprintf(`    - id: slow
@@ -167,7 +167,7 @@ func TestLongResponseOutlivesHeaderTimeout(t *testing.T) {
 func TestRealBinarySIGTERMWithCallInFlight(t *testing.T) {
 	tmp := t.TempDir()
 	bin, fake := filepath.Join(tmp, "station"), filepath.Join(tmp, "fakechild")
-	for target, pkg := range map[string]string{bin: ".", fake: "github.com/hollis-labs/station/cmd/station-next/testdata/fakechild"} {
+	for target, pkg := range map[string]string{bin: ".", fake: "github.com/hollis-labs/station/cmd/station/testdata/fakechild"} {
 		if out, err := exec.Command("go", "build", "-o", target, pkg).CombinedOutput(); err != nil {
 			t.Fatalf("build %s: %v\n%s", pkg, err, out)
 		}

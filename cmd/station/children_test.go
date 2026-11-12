@@ -23,7 +23,7 @@ import (
 // (a Python entry point with a provider key reference) and tripo (a shell wrapper with arguments).
 func TestProductionChildShapes(t *testing.T) {
 	fake := filepath.Join(t.TempDir(), "fakechild")
-	if out, err := exec.Command("go", "build", "-o", fake, "github.com/hollis-labs/station/cmd/station-next/testdata/fakechild").CombinedOutput(); err != nil {
+	if out, err := exec.Command("go", "build", "-o", fake, "github.com/hollis-labs/station/cmd/station/testdata/fakechild").CombinedOutput(); err != nil {
 		t.Fatalf("build fakechild: %v\n%s", err, out)
 	}
 	t.Setenv("FAKECHILD", fake) // the tripo wrapper execs it; a wrapper in production execs its own binary

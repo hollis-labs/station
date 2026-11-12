@@ -81,7 +81,7 @@ func TestPlan(t *testing.T) {
 func TestReadOnlyCommandsCreateNothing(t *testing.T) {
 	tmp := t.TempDir()
 	bin, fake := filepath.Join(tmp, "station"), filepath.Join(tmp, "fakechild")
-	for target, pkg := range map[string]string{bin: ".", fake: "github.com/hollis-labs/station/cmd/station-next/testdata/fakechild"} {
+	for target, pkg := range map[string]string{bin: ".", fake: "github.com/hollis-labs/station/cmd/station/testdata/fakechild"} {
 		if out, err := exec.Command("go", "build", "-o", target, pkg).CombinedOutput(); err != nil {
 			t.Fatalf("build %s: %v\n%s", pkg, err, out)
 		}
