@@ -26,7 +26,7 @@ deployables come from this repo, in three shapes:
 | avatar-station | `station serve -config <avatar>.yaml -http-addr 127.0.0.1:8097` (MCP host) | One logical server `avatar` (process transport, `/avatar`, `bearer_tokens` set). The child gets its settings through an `env:` block (workflow path, Hadron URL and token file, output/model dirs, budget caps, its own HTTP address, origins, public URL). Built 2026-10-15. |
 | design-station | same command, `127.0.0.1:8110` (MCP host) | Two process logical servers: `design-suite` (`/design-suite`, a Python venv entry point whose env block carries provider API keys inline) and `tripo` (`/tripo`, a shell wrapper, args `mcp --toolset full`). `allowed_origins` and `bearer_tokens` are empty on both. Different build (2026-11-05) from avatar-station. In daily use: the Tether gateway entries for `design_*` and `tripo_*` tools point at it. No Station-owned database. |
 | station-llm-gateway | `-api-only`, loopback 18082, auth enforce with a keys file | See data inventory. |
-| station-usage-monitor | `-api-only`, loopback 18083, auth enforce with a keys file | See data inventory. |
+| station-usage-monitor | `-api-only`, loopback 18083 (also reached by a public name through the local TLS proxy), auth enforce with a keys file | See data inventory. |
 
 What Substrate has: module `mcp` (go-mcp server plus Streamable HTTP at `/mcp`, `RegisterChecked` typed tools,
 `UseToolFilter`, `ServeStdio` with a token file, scope `<app>.mcp`) and module `pluginhost` (libs plugin-host

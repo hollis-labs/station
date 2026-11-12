@@ -242,3 +242,53 @@ func TestRealBinaryLifecycle(t *testing.T) {
 		}
 	}
 }
+
+// The live usage monitor is also reached by a public name through the local TLS proxy. A listed
+// Host is served only from a loopback peer carrying exactly one X-Forwarded-Proto: https.
+func TestServedThroughTheTLSProxyName(t *testing.T) {
+	const public = "usage.example.test"
+	u := newUnit(t, "")
+	cfg := fmt.Sprintf("httphost: {addr: %q}\nidentity: {bcrypt_cost: 4, trusted_proxy: true}\n%s: {allowed_hosts: [%s]}\n", u.addr, settingsKey, public)
+	if err := os.WriteFile(u.cfg, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	u.mustRun(ownerPassphrase+"\n", "identity", "setup", "--username", "owner")
+	reader := strings.TrimSpace(u.mustRunStdout("", "identity", "key", "create", "--name", "reader", "--scope", "usage-monitor.read", "--stdout"))
+	other := strings.TrimSpace(u.mustRunStdout("", "identity", "key", "create", "--name", "other", "--scope", "usage-monitor.ingest", "--stdout"))
+	s := u.serve()
+	defer s.stop(t)
+	call := func(key, host string, proto ...string) int {
+		t.Helper()
+		req, _ := http.NewRequest("GET", s.base+"/api/usage-monitor/v1/accounts", nil)
+		req.Header.Set("Authorization", "Bearer "+key)
+		req.Host = host
+		for _, p := range proto {
+			req.Header.Add("X-Forwarded-Proto", p)
+		}
+		res, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = res.Body.Close()
+		return res.StatusCode
+	}
+	for _, tc := range []struct {
+		name  string
+		key   string
+		host  string
+		proto []string
+		want  int
+	}{
+		{"proxied, listed host, one https", reader, public, []string{"https"}, 200},
+		{"listed host without the proxy header", reader, public, nil, 403},
+		{"listed host, http claimed", reader, public, []string{"http"}, 403},
+		{"listed host, two proxy values", reader, public, []string{"https", "https"}, 403},
+		{"unlisted host with the header", reader, "other.example.test", []string{"https"}, 403},
+		{"proxied, key without the scope", other, public, []string{"https"}, 403},
+		{"loopback host, no proxy", reader, u.addr, nil, 200},
+	} {
+		if got := call(tc.key, tc.host, tc.proto...); got != tc.want {
+			t.Errorf("%s: %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}

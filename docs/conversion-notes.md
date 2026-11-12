@@ -582,9 +582,7 @@ They present the operator's token today. At cutover each source's `credential_re
 **Who arrives by the public name.** From `docs/llm-gateway-adoption.md`: every relay client (OpenAI and Anthropic SDKs, the JEV
 decision client, the usage monitor's collectors) uses `https://<public name>/api/llm-gateway`; Caddy terminates TLS on the tailnet
 address and forwards to the loopback listener. Only the host-local diagnostic root is plain loopback
-(`http://127.0.0.1:18082/api/llm-gateway/v1`). The usage monitor itself is documented only as loopback 18083 (health and keys
-file); no document gives it a public name. If the driver finds one in the proxy config, the usage unit needs the same two
-settings.
+(`http://127.0.0.1:18082/api/llm-gateway/v1`). The usage monitor is also reached by a public name: the proxy has a host matcher that reverse-proxies to 127.0.0.1:18083 (driver, from the proxy config; the loopback-only statements in the older docs are out of date). The usage unit therefore needs `usage-monitor.allowed_hosts` and `identity.trusted_proxy: true`, and `TestServedThroughTheTLSProxyName` in `cmd/usage-monitor` proves the same served and refused cases (mutation-checked).
 
 **What the ported gateway needs.** `llm-gateway.allowed_hosts: [<public name>]` and `identity.trusted_proxy: true` in the unit's
 override file. `TestServedThroughTheTLSProxyName` runs the real binary and proves: a listed Host with a loopback peer and exactly
@@ -604,3 +602,39 @@ reference in use (`keychain://station/opencode-go` for usage, `keychain://statio
 checks where the entry lives (attributes only, not values); if it is under `tether`, the owner re-enters it with
 `<unit> secret set <ref>` (stdin, never printed) or it moves to a `file://` reference. A positive-control check, `<unit> secret
 check <ref>`, confirms resolution before the old unit is stopped. Framework ask: `secrets.legacy` config for the read-through.
+
+## Provider keys that live only in the legacy keychain location (driver, entry names only, 2026-11-12)
+
+**Facts.** Service `hollis-labs` holds `station/ledger-dsn`, `opencode/zen` and eight design-suite keys. Service `tether` (the legacy
+location the old build read through) holds `provider-api-key:` entries for anthropic/loom, anthropic/work, gemini/work,
+huggingface/work, openai/embed, openai/work, opencode/zen, openrouter/work, tesseract/mcp-token and typesafe/jev. The Substrate
+secrets module reads only `hollis-labs`, so without a copy the ported gateway cannot resolve six of its provider keys.
+
+**References the gateway uses** (read from the active revision in the rehearsal copy; reference strings only): `keychain://opencode/zen`
+(two providers), `openai/work`, `anthropic/work`, `gemini/work`, `openrouter/work`, `huggingface/work`, `typesafe/jev`; two providers
+carry no key reference. The ledger is not `station/ledger-dsn`: the active revision uses the Postgres host/user form with a
+`password_ref` that is a `file://` path to a credential-issuance file, which resolves in the new unit unchanged (absolute file
+reference). `station/ledger-dsn` (a `dsn_ref` form) is therefore not in use by revision 10; it only matters if a later revision
+returns to it. `openai/embed`, `anthropic/loom` and `tesseract/mcp-token` are not referenced by the gateway (other callers' keys).
+So the copy set for the gateway is: `keychain://openai/work`, `anthropic/work`, `gemini/work`, `openrouter/work`,
+`huggingface/work`, `typesafe/jev` (`opencode/zen` already exists in the new location). The usage monitor's `go-api` source in the
+example config names `keychain://station/opencode-go`, which exists under neither service (driver); the live reference name for
+that source is still to come from the live config structure.
+
+**The copy (run by the driver at cutover; the owner re-types nothing).** `scripts/copy-legacy-secrets UNIT REF...` pipes
+`secret-tool lookup service tether username provider-api-key:<ns>/<key>` into `<unit> secret set keychain://<ns>/<key>`, so the value
+exists only in the pipe: not in an argument, a variable, the environment or any output. The legacy entry is read, never changed (it is
+the rollback). Afterwards it runs `<unit> secret check` and compares the byte count with the legacy value's. An entry already
+present is left alone (`COPY_OVERWRITE=1` replaces it), a missing legacy entry or a malformed reference is reported and makes the exit
+status non-zero. Command form, with an explicit data directory (the live one for that app name is the default otherwise):
+
+```
+SUBSTRATE_CONFIG=<unit override file> COPY_BIN=<llm-gateway binary> COPY_DATA_DIR=<absolute data dir> \
+  scripts/copy-legacy-secrets llm-gateway keychain://openai/work keychain://anthropic/work keychain://gemini/work \
+  keychain://openrouter/work keychain://huggingface/work keychain://typesafe/jev
+```
+
+**Rehearsal** (real binary, a throwaway `dbus-run-session` with its own gnome-keyring, fake values, nothing on the live keyring): two
+legacy entries copied and verified (`25 bytes`, `14 bytes`), an entry already in the new location left alone, a missing legacy entry
+reported with exit 1, a second run idempotent with exit 0, the legacy entry still present afterwards, and the captured output contains
+no value. The rehearsal found one bug (a missing legacy entry ended the script silently under `pipefail`), fixed before commit.
