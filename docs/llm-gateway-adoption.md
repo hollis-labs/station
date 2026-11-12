@@ -12,33 +12,33 @@ Usage history remains in PostgreSQL.
 
 ## Endpoint and access
 
-- HTTPS API root: `https://llm.nanite.cloud/api/llm-gateway/v1`.
+- HTTPS API root: `https://gateway.example.test/api/llm-gateway/v1`.
 - OpenAI-compatible SDK base URL: that same root, including `/v1`.
-- Anthropic SDK base URL: `https://llm.nanite.cloud/api/llm-gateway`;
+- Anthropic SDK base URL: `https://gateway.example.test/api/llm-gateway`;
   the SDK appends `/v1/messages`.
 - Host-local diagnostic API root: `http://127.0.0.1:18082/api/llm-gateway/v1`.
-- Host: agent-os. DNS points to its Tailscale IP; Caddy terminates wildcard TLS
+- Host: the gateway host. DNS points to its Tailscale IP; Caddy terminates wildcard TLS
   and forwards to the loopback-only listener. Clients on other machines need
   tailnet connectivity. TLS verification stays enabled.
-- Health: `GET https://llm.nanite.cloud/healthz` (no credential; liveness only).
+- Health: `GET https://gateway.example.test/healthz` (no credential; liveness only).
 - Authentication is enforced on every gateway route, including loopback.
 
 The HTTPS route was activated and verified on 2026-10-17. The complete live
 matrix passed through Caddy: 12 model routes, three streaming API families,
 three tool-call probes, auth/scope restrictions, and persisted attribution for
 all 18 inference requests. TLS certificate validation was enabled. A generic
-agent-os landing response is not gateway readiness: `/v1/models` must return 401
+the gateway host landing response is not gateway readiness: `/v1/models` must return 401
 without a key, and a JSON model list with an authorized key.
 
 ## Provision one identity per app or evaluation launch
 
-An operator on agent-os issues the credential. Adopting agents should request
+An operator on the gateway host issues the credential. Adopting agents should request
 one for their app, not copy the operator or smoke-test credential.
 
 ```bash
-STATION=/home/chrispian/.cerberus/apps/station/station-llm-gateway/bin/station-llm-gateway
-DB=/home/chrispian/.local/state/station/gateway/gateway.db
-API_CONFIG=/home/chrispian/.config/station/gateway/api.yaml
+STATION=$HOME/.cerberus/apps/station/station-llm-gateway/bin/station-llm-gateway
+DB=$HOME/.local/state/station/gateway/gateway.db
+API_CONFIG=$HOME/.config/station/gateway/api.yaml
 
 "$STATION" gateway-store status -db "$DB"
 "$STATION" client list -gateway-db "$DB"
@@ -52,7 +52,7 @@ activation applies its configuration as well as its credentials.
 ```bash
 "$STATION" client issue -gateway-db "$DB" \
   -expected LATEST_REVISION -actor operator -id my-app-eval \
-  -output /home/chrispian/.config/station/gateway/tokens/my-app-eval.token \
+  -output $HOME/.config/station/gateway/tokens/my-app-eval.token \
   -scopes llm-gateway.chat,llm-gateway.models.read
 ```
 
@@ -185,7 +185,7 @@ from pathlib import Path
 import urllib.request
 import uuid
 
-base = "https://llm.nanite.cloud/api/llm-gateway/v1"
+base = "https://gateway.example.test/api/llm-gateway/v1"
 token = Path("/private/path/my-app-eval.token").read_text().strip()
 conversation = str(uuid.uuid4())  # retain for subsequent turns in this conversation
 request = urllib.request.Request(
@@ -218,7 +218,7 @@ and invalid routing. `--live` makes bounded, potentially billable calls.
 
 ```bash
 python3 scripts/gateway-smoke.py \
-  --base-url https://llm.nanite.cloud/api/llm-gateway/v1 \
+  --base-url https://gateway.example.test/api/llm-gateway/v1 \
   --token-file /private/path/smoke.token \
   --operator-token-file /private/path/operator.token \
   --output /private/path/results.json --live

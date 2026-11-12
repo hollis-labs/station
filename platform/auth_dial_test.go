@@ -40,7 +40,7 @@ func TestAuthDial(t *testing.T) {
 	if _, err := dialMode(t, lo, "bogus", ""); err == nil {
 		t.Fatal("invalid value accepted")
 	}
-	for _, l := range []string{"0.0.0.0:8081", ":8081", "100.64.0.5:8081"} {
+	for _, l := range []string{"0.0.0.0:8081", ":8081", "192.0.2.5:8081"} {
 		if _, err := dialMode(t, Config{Listen: l}, "off", ""); err == nil {
 			t.Fatalf("off on %s must be refused", l)
 		}

@@ -8,18 +8,18 @@ already have a selected revision; see the README's SQLite import instructions.
 Base URL on the dogfood host, enabled and verified on 2026-10-18:
 
 ```text
-https://llm.nanite.cloud/api/llm-gateway/v1/management
+https://gateway.example.test/api/llm-gateway/v1/management
 ```
 
 The Cerberus resource `station-llm-gateway` starts with
-`-gateway-db /home/chrispian/.local/state/station/gateway/gateway.db`.
+`-gateway-db $HOME/.local/state/station/gateway/gateway.db`.
 SQLite owns gateway configuration and hashed client identities. The bootstrap
-`/home/chrispian/.config/station/gateway/api.yaml` still owns listener/auth settings
+`$HOME/.config/station/gateway/api.yaml` still owns listener/auth settings
 and other plugins. PostgreSQL remains the usage ledger; this cutover did not
 migrate or discard usage history.
 
 The host-local dedicated credential is
-`/home/chrispian/.config/station/gateway/tokens/management.token` (0600).
+`$HOME/.config/station/gateway/tokens/management.token` (0600).
 It belongs to `station-management`; give adopting integrations their own identity
 and only their needed scopes. The existing operator and smoke credentials cannot
 access management. See the [adoption guide](llm-gateway-adoption.md) for provisioning.
@@ -180,7 +180,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 opener = urllib.request.build_opener(NoRedirect)
-base = "https://llm.nanite.cloud/api/llm-gateway/v1/management"
+base = "https://gateway.example.test/api/llm-gateway/v1/management"
 token = Path("/private/station-management.token").read_text().strip()
 headers = {"Authorization": "Bearer " + token}
 request = urllib.request.Request(base + "/models", headers=headers)

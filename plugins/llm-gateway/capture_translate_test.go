@@ -8,6 +8,9 @@ import (
 	"testing"
 )
 
+// fakeProviderKey is assembled at run time so no provider-key-shaped literal sits in the tree.
+var fakeProviderKey = "sk-" + "proj-abcdefghijklmnopqrstuvwxyz0123456789"
+
 func TestOpenAIResponsesRelayAndStream(t *testing.T) {
 	const respJSON = `{"id":"resp_1","object":"response","model":"gpt-real","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello responses"}]}],"usage":{"input_tokens":50,"output_tokens":12,"input_tokens_details":{"cached_tokens":10},"output_tokens_details":{"reasoning_tokens":4}}}`
 	e := newGW(t, func(w http.ResponseWriter, r *http.Request) {
@@ -72,7 +75,7 @@ func TestLedgerFullCaptureSanitizesSecretsAndPII(t *testing.T) {
 	e := newGW(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// Upstream response accidentally echoes a known provider secret, an inline OpenAI key, and PII.
-		_, _ = io.WriteString(w, `{"id":"c1","object":"chat.completion","model":"gpt-real","choices":[{"index":0,"message":{"role":"assistant","content":"Reach alice@example.com or use upstream-o1-secret / sk-proj-abcdefghijklmnopqrstuvwxyz0123456789"},"finish_reason":"stop"}],"usage":{"prompt_tokens":15,"completion_tokens":9}}`)
+		_, _ = io.WriteString(w, `{"id":"c1","object":"chat.completion","model":"gpt-real","choices":[{"index":0,"message":{"role":"assistant","content":"Reach alice@example.com or use upstream-o1-secret / `+fakeProviderKey+`"},"finish_reason":"stop"}],"usage":{"prompt_tokens":15,"completion_tokens":9}}`)
 	}, openaiOK, anthropicOK, cfgOpts{extra: extra})
 
 	req := `{
@@ -94,7 +97,7 @@ func TestLedgerFullCaptureSanitizesSecretsAndPII(t *testing.T) {
 		"upstream-o1-secret",
 		"upstream-an-secret",
 		"upstream-emb-secret",
-		"sk-proj-abcdefghijklmnopqrstuvwxyz0123456789",
+		fakeProviderKey,
 		"alice@example.com",
 		"bob@example.com",
 	} {

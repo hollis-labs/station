@@ -215,14 +215,14 @@ func TestBestEffortFastFailoverAndModelsReachability(t *testing.T) {
 
 	cfg := Config{
 		Providers: []ProviderConfig{
-			{ID: "agent-os-llama", Dialect: "openai", BaseURL: sleepingLocal.URL},
+			{ID: "local-llama", Dialect: "openai", BaseURL: sleepingLocal.URL},
 			{ID: "openai-hub", Dialect: "openai", BaseURL: cloudBackup.URL},
 		},
 		Models: []ModelConfig{{
 			Name: "general",
 			Targets: []TargetConfig{
 				{
-					Provider:   "agent-os-llama",
+					Provider:   "local-llama",
 					Model:      "llama-3.3-70b",
 					Tags:       []string{"local", "free"},
 					BestEffort: true,
@@ -237,8 +237,8 @@ func TestBestEffortFastFailoverAndModelsReachability(t *testing.T) {
 		}},
 	}
 	providers := map[string]*provider{
-		"agent-os-llama": {id: "agent-os-llama", dialect: openaiDialect{}, baseURL: sleepingLocal.URL, client: sleepingLocal.Client()},
-		"openai-hub":     {id: "openai-hub", dialect: openaiDialect{}, baseURL: cloudBackup.URL, client: cloudBackup.Client()},
+		"local-llama": {id: "local-llama", dialect: openaiDialect{}, baseURL: sleepingLocal.URL, client: sleepingLocal.Client()},
+		"openai-hub":  {id: "openai-hub", dialect: openaiDialect{}, baseURL: cloudBackup.URL, client: cloudBackup.Client()},
 	}
 	gw, err := NewGateway(cfg, providers, NewLedger(newMemStore(50), quiet), quiet)
 	if err != nil {
@@ -315,7 +315,7 @@ func TestBestEffortFastFailoverAndModelsReachability(t *testing.T) {
 		t.Fatalf("model general should still be reachable via backup target: %+v", m)
 	}
 	if m.Targets[0].Reachable || m.Targets[0].State != "open" || !m.Targets[0].BestEffort {
-		t.Fatalf("target[0] (agent-os-llama) = %+v, want Reachable=false State=open BestEffort=true", m.Targets[0])
+		t.Fatalf("target[0] (local-llama) = %+v, want Reachable=false State=open BestEffort=true", m.Targets[0])
 	}
 	if !m.Targets[1].Reachable || m.Targets[1].State != "closed" {
 		t.Fatalf("target[1] (openai-hub) = %+v, want Reachable=true State=closed", m.Targets[1])
