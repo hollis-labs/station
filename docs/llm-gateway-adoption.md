@@ -88,7 +88,8 @@ Scopes:
 | `llm-gateway.chat` | Chat Completions, Responses, and Messages |
 | `llm-gateway.embed` | Embeddings |
 | `llm-gateway.decide` | JEV System-1 decisions |
-| `llm-gateway.usage.read` | Operator access to usage across principals |
+| `llm-gateway.usage.read` | `GET /v1/usage/export` (every caller, metering only, no bodies) and `GET /v1/usage` for the key's own rows without Detail. This is the usage collector's scope. |
+| `llm-gateway.usage.detail` | `GET /v1/usage` for every caller with each entry's Detail (with `ledger.capture.mode: full`, the request and response bodies). Operator only; never give it to a collector. |
 | `llm-gateway.catalog.write` | Trigger metadata refresh or reload the configured price file |
 | `llm-gateway.management.*` | All management permissions; credential grants also require the scopes being granted |
 | `llm-gateway.*` | All gateway permissions, including management; reserve for trusted administrators |
@@ -274,8 +275,9 @@ cerberus resource inspect station-llm-gateway
 cerberus resource reload station-llm-gateway --ack
 ```
 
-`GET /v1/usage` requires the usage-read scope. It returns entries, totals, and
-buffer health. Records persist across normal restarts; the asynchronous writer
+`GET /v1/usage` requires the usage-read scope. A key holding only that scope sees its own principal's entries
+and totals without Detail (asking for another principal is a 403); `llm-gateway.usage.detail` (or `llm-gateway.*`)
+sees every caller with Detail. It returns entries, totals, and buffer health. Records persist across normal restarts; the asynchronous writer
 is still bounded and can lose queued records on abrupt crash/overflow. Monitor
 `queued`, `dropped`, and `write_failures`. This is not a lossless financial ledger.
 Payload capture is off; prompts and completions are not stored by the configured

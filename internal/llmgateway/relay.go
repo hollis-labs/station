@@ -921,12 +921,31 @@ func (g *Gateway) CatalogPricesReloadHandler() http.Handler {
 // UsageHandler answers GET /v1/usage. Filters: limit (1..1000), principal,
 // since (RFC 3339). It reads the ledger, so on the durable store it survives
 // restarts.
+//
+// A reader holding ScopeUsageDetail sees every caller's entries with their Detail.
+// Any other reader (usage.read alone) sees only its own principal's entries,
+// without Detail: asking for another principal is refused, and the totals are
+// that principal's too. The fleet-wide history without bodies is /v1/usage/export.
 func (g *Gateway) UsageHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		bad := func(msg string) {
 			openaiDialect{}.WriteError(w, http.StatusBadRequest, "invalid_request", msg)
 		}
+		p, verified := auth.FromContext(r.Context())
+		detail := verified && p.Verified && p.HasScope(ScopeUsageDetail)
 		q := Query{Limit: 100, Principal: r.URL.Query().Get("principal")}
+		if !detail {
+			own := callerOf(r)
+			if !own.Known {
+				openaiDialect{}.WriteError(w, http.StatusUnauthorized, "unauthenticated", "a verified credential is required")
+				return
+			}
+			if q.Principal != "" && q.Principal != own.ID {
+				openaiDialect{}.WriteError(w, http.StatusForbidden, "forbidden", "this credential may read only its own usage")
+				return
+			}
+			q.Principal = own.ID
+		}
 		if v := r.URL.Query().Get("limit"); v != "" {
 			n, err := strconv.Atoi(v)
 			if err != nil || n < 1 || n > 1000 {
@@ -948,6 +967,13 @@ func (g *Gateway) UsageHandler() http.Handler {
 			g.logger.Error("ledger.query_failed", "request_id", RequestID(r), "err", err)
 			openaiDialect{}.WriteError(w, http.StatusServiceUnavailable, "ledger_unavailable", "the usage ledger could not be read")
 			return
+		}
+		if !detail {
+			// Clone before stripping; memory stores may share the slice.
+			entries = append([]Entry{}, entries...)
+			for i := range entries {
+				entries[i].Detail = nil
+			}
 		}
 		out := map[string]any{"entries": entries, "totals": totals}
 		if stats != nil {

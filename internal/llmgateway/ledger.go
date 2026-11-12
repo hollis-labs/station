@@ -32,9 +32,11 @@ type Record struct {
 	Target    *target
 	Usage     *Usage
 	Price     *usageledger.PriceSnapshot
-	// Detail is the call's small structured result worth keeping: for a
-	// decision, the answers (labels, scores, probabilities). It is the
-	// upstream's own output, never a prompt.
+	// Detail is what the call keeps beyond its metering: for a decision, the
+	// answers (labels, scores, probabilities); with ledger.capture.mode "full",
+	// the sanitized request and response bodies. Only a reader holding
+	// ScopeUsageDetail is shown it (UsageHandler strips it otherwise; the
+	// export always does).
 	Detail   json.RawMessage
 	Status   int
 	Outcome  string

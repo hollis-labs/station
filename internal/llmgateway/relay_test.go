@@ -112,6 +112,8 @@ auth:
   keys:
     - {id: caller-1, sha256: %s, scopes: ["llm-gateway.*"]}
     - {id: narrow, sha256: %s, scopes: ["llm-gateway.models.read"]}
+    - {id: collector, sha256: %s, scopes: ["llm-gateway.usage.read"]}
+    - {id: other-reader, sha256: %s, scopes: ["llm-gateway.usage.read"]}
 plugins:
   llm-gateway:
 %s
@@ -143,7 +145,7 @@ plugins:
           - {provider: o2, model: t2}
 %s
 %s
-`, hashOf("good"), hashOf("narrow"), catalogLine, e.o1.URL, e.o2.URL, e.an.URL, e.o2.URL, e.jv.URL, opts.policy, opts.extra)
+`, hashOf("good"), hashOf("narrow"), hashOf("collector"), hashOf("other-reader"), catalogLine, e.o1.URL, e.o2.URL, e.an.URL, e.o2.URL, e.jv.URL, opts.policy, opts.extra)
 	logger := opts.logger
 	if logger == nil {
 		logger = quiet
