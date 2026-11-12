@@ -314,8 +314,12 @@ port from the migration range and a temporary data directory.
   databases are, and `llm-gateway` / `usage-monitor` default to `~/.local/share/llm-gateway` and
   `~/.local/share/usage-monitor`, which do not exist. Those units are not live until cutover.
 - `validate`, `list`, `--help`, `help`, `completion` and `secret check` now start only the modules that open no file
-  (`config`, `logging`, `cli`, plus `secrets` for `secret check`) and prepare no directory. Only `serve` (the default
-  command) and `secret set` create anything. `TestReadOnlyCommandsCreateNothing` runs the real binary with an empty
+  (`config`, `logging`, `cli`, plus `secrets` for `secret check`) and prepare no directory. Review correction: the
+  creating commands are `serve` only with no further argument (a bare command prints help), `secret set` (the
+  directory only; it used to leave an empty `<app>.db`), `identity setup`, `identity key create`, and, for the
+  gateway and usage binaries, `gateway-store stage|activate|migrate-from` and `migrate-from`. A line that is not exactly
+  one of those with its required flags starts nothing (`appboot.Plan`). `serve`, `validate` and the `gateway-store`
+  reads refuse a data directory with no database, checked before any module starts. `TestReadOnlyCommandsCreateNothing` runs the real binary with an empty
   HOME and no `STATION_DATA_DIR` and asserts nothing appears; `secret set` is the positive control.
 - `TestMain` of `cmd/station-next` points HOME and the XDG variables at a scratch root for the whole package and
   unsets `STATION_DATA_DIR`; `TestDefaultDataDirIsNotLive` fails if a run without the variable could resolve outside
@@ -743,7 +747,7 @@ Dry runs on the server host passed for all four targets (nothing changed). Three
    `~/.local/share/llm-gateway/llm-gateway.db` and `~/.local/share/usage-monitor/usage-monitor.db`, the files the new build opens after
    `migrate-from`; the old `~/.local/state/station/{gateway,usage}` databases are never touched. Order at cutover: stop the old unit, take the online-backup
    copy, run `migrate-from` with the new binary (from the downloaded artifact) into the data directory, then `fleet-install deploy` (its preflight
-   backs up the migrated file; its restart starts the new unit). A missing database makes `serve` refuse to start, so a deploy before the migration
+   backs up the migrated file; its restart starts the new unit). A missing database makes `serve` refuse to start (true since the review fix: `appboot.ModeServe` checks for the file before any module starts), so a deploy before the migration
    fails loudly instead of creating an empty one.
 2. **No link takeover (the fallback).** The new apps use new links, `~/.local/libexec/station-gateway/llm-gateway` and `.../usage-monitor`, and a
    drop-in that sorts after the old one (`30-llm-gateway-exec.conf`, `30-usage-monitor-exec.conf`; it clears and sets ExecStart, so it wins over the old

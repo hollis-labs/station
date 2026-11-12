@@ -24,8 +24,10 @@ import (
 //     (WriteError).
 //
 // Cross-protocol translation, when it exists, is a separate optional adapter
-// keyed by (client dialect, upstream dialect). None is registered today, so a
-// target whose dialect differs from the endpoint is simply not eligible.
+// keyed by (client dialect, upstream dialect) and operation (translate.go
+// registers OpenAI chat to Anthropic and Anthropic chat to OpenAI). A target
+// whose dialect differs from the endpoint and has no translator for the
+// operation is not eligible.
 // Operation is what a request asks the model to do.
 type Operation string
 

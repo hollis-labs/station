@@ -41,6 +41,21 @@ enforced authentication.
 | `llm-gateway.management.write` | Configuration validation and staged edits |
 | `llm-gateway.management.activate` | Select a stored revision for the next service reload |
 
+**`management.write` plus `management.activate` is the authority to read the process's secrets.** A holder can
+stage a configuration that points a provider at any `base_url` with any `api_key_env` or secret reference as its
+key, activate it, and the next start sends that credential to a host of the holder's choosing. Treat the pair like
+the ability to read every credential the service can resolve; do not give it to a caller you would not give those to.
+
+Literal provider `headers` are never returned: the management GET and `gateway-store show` show the header names
+with the value `[redacted]`. Writing a document back with the placeholder keeps the stored value (it is restored
+from the revision being edited, named by `If-Match` or `--expected`); a placeholder with nothing to restore is
+refused.
+
+`GET /v1/usage` shows a key holding only `llm-gateway.usage.read` its own rows without Detail; the separate
+`llm-gateway.usage.detail` scope (also covered by `llm-gateway.*`) shows every caller's rows with Detail, which with
+`ledger.capture.mode: full` is the request and response bodies. The usage collector's key needs only `usage.read`
+and reads `GET /v1/usage/export`, which never carries Detail.
+
 The existing `llm-gateway.*` and `*` wildcards include management authority.
 Ordinary app keys with chat/model-read scopes cannot use these routes. An operator
 can issue a dedicated management key with `identity key create` (offline) or
