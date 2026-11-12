@@ -13,7 +13,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/hollis-labs/substrate/boot"
+
 	"github.com/hollis-labs/substrate/modules/cli"
+
+	"github.com/hollis-labs/station/internal/appcmd"
 )
 
 func main() {
@@ -47,6 +50,6 @@ func (s *station) root(ctx context.Context, args []string) *cobra.Command {
 	serve := s.serveCmd(ctx)
 	rootCmd.RunE = func(c *cobra.Command, args []string) error { return serve.RunE(c, args) }
 	rootCmd.Args = cobra.NoArgs
-	rootCmd.AddCommand(serve, s.listCmd(), s.validateCmd(), s.secretCmd())
+	rootCmd.AddCommand(serve, s.listCmd(), s.validateCmd(), appcmd.Secret(s.app))
 	return rootCmd
 }

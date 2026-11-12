@@ -1,4 +1,5 @@
-package main
+// Package appcmd holds the commands every Station binary has.
+package appcmd
 
 import (
 	"errors"
@@ -8,21 +9,22 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/hollis-labs/substrate/module"
 	"github.com/hollis-labs/substrate/modules/secrets"
 )
 
-// secretCmd provisions and checks the credential references a logical server's env refers to
+// Secret provisions and checks the credential references a logical server's env refers to
 // (for example file://design/provider-key). The value is read from stdin, never from argv, so no
 // key is in a shell history, a process listing or a config file; check prints where a reference
 // resolves from and how long the value is, never the value.
-func (s *station) secretCmd() *cobra.Command {
+func Secret(app *module.App) *cobra.Command {
 	root := &cobra.Command{Use: "secret", Short: "Provision and check credential references"}
 	root.AddCommand(&cobra.Command{
 		Use:   "set <ref>",
 		Short: "Store the value read from stdin under a reference",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			r := secrets.Resolver(s.app)
+			r := secrets.Resolver(app)
 			if r == nil {
 				return errors.New("the secrets module must be started")
 			}
@@ -37,7 +39,7 @@ func (s *station) secretCmd() *cobra.Command {
 			if err := r.Set(c.Context(), args[0], strings.NewReader(value)); err != nil {
 				return fmt.Errorf("secret set %s: %w", args[0], err)
 			}
-			_, err = fmt.Fprintf(c.OutOrStdout(), "station: stored %s\n", args[0])
+			_, err = fmt.Fprintf(c.OutOrStdout(), "%s: stored %s\n", app.Name, args[0])
 			return err
 		},
 	})
@@ -46,7 +48,7 @@ func (s *station) secretCmd() *cobra.Command {
 		Short: "Resolve a reference and say where it came from, never the value",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			r := secrets.Resolver(s.app)
+			r := secrets.Resolver(app)
 			if r == nil {
 				return errors.New("the secrets module must be started")
 			}
@@ -54,7 +56,7 @@ func (s *station) secretCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("secret check %s: %w", args[0], err)
 			}
-			_, err = fmt.Fprintf(c.OutOrStdout(), "station: %s resolves (source %s, %d bytes)\n", args[0], res.Source, res.Secret.Len())
+			_, err = fmt.Fprintf(c.OutOrStdout(), "%s: %s resolves (source %s, %d bytes)\n", app.Name, args[0], res.Source, res.Secret.Len())
 			return err
 		},
 	})

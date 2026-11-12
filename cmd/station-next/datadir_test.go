@@ -21,15 +21,15 @@ import (
 // directory on a real machine. TestMain moves HOME and the XDG variables to a scratch root; this
 // fails if any run could still fall back to somewhere else.
 func TestDefaultDataDirIsNotLive(t *testing.T) {
-	if os.Getenv(appdirs.DataDirEnv) != "" {
-		t.Fatalf("%s is set for the whole package; tests must set an explicit temporary directory themselves", appdirs.DataDirEnv)
+	if os.Getenv(appdirs.DataDirEnv(substrateApp)) != "" {
+		t.Fatalf("%s is set for the whole package; tests must set an explicit temporary directory themselves", appdirs.DataDirEnv(substrateApp))
 	}
 	dirs, err := appdirs.Resolve(substrateApp, os.Getenv)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(dirs.Data, guardRoot+string(filepath.Separator)) {
-		t.Fatalf("a run without %s would use %s, outside the scratch root", appdirs.DataDirEnv, dirs.Data)
+		t.Fatalf("a run without %s would use %s, outside the scratch root", appdirs.DataDirEnv(substrateApp), dirs.Data)
 	}
 }
 

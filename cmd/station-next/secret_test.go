@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/substrate/boot"
+
+	"github.com/hollis-labs/station/internal/appcmd"
 )
 
 func bootOnly(t *testing.T) *station {
@@ -30,7 +32,7 @@ func TestSecretSetReadsStdinAndCheckNeverPrintsTheValue(t *testing.T) {
 	const ref, value = "file://stand-in/provider-key", "stand-in-secret-value-0003"
 
 	var out, errOut bytes.Buffer
-	cmd := s.secretCmd()
+	cmd := appcmd.Secret(s.app)
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)
 	cmd.SetIn(strings.NewReader(value + "\n"))
@@ -43,7 +45,7 @@ func TestSecretSetReadsStdinAndCheckNeverPrintsTheValue(t *testing.T) {
 	}
 
 	out.Reset()
-	cmd = s.secretCmd()
+	cmd = appcmd.Secret(s.app)
 	cmd.SetOut(&out)
 	cmd.SetArgs([]string{"check", ref})
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
@@ -54,14 +56,14 @@ func TestSecretSetReadsStdinAndCheckNeverPrintsTheValue(t *testing.T) {
 	}
 
 	// An empty stdin and an unknown reference are refused with a message that does not carry a value.
-	cmd = s.secretCmd()
+	cmd = appcmd.Secret(s.app)
 	cmd.SetIn(strings.NewReader("\n"))
 	cmd.SetArgs([]string{"set", "file://stand-in/empty"})
 	cmd.SilenceUsage, cmd.SilenceErrors = true, true
 	if err := cmd.ExecuteContext(context.Background()); err == nil || !strings.Contains(err.Error(), "empty value") {
 		t.Fatalf("empty stdin: %v", err)
 	}
-	cmd = s.secretCmd()
+	cmd = appcmd.Secret(s.app)
 	cmd.SetArgs([]string{"check", "file://stand-in/missing"})
 	cmd.SilenceUsage, cmd.SilenceErrors = true, true
 	if err := cmd.ExecuteContext(context.Background()); err == nil {
