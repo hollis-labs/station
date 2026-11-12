@@ -34,7 +34,7 @@ Survey only, no code converted. Data is in use: it is migrated, never moved asid
 8. **Two MCP-host instances with different builds** (avatar-station 2026-10-15, design-station 2026-11-05) run from
    binaries outside this repo's `deploy.yaml`; the fleet descriptor covers only the gateway and the usage monitor. Cutover
    needs descriptors for all four.
-9. **Hygiene:** provider API keys inline in design-station's config env block (move to the `secrets` module); the
+9. **Hygiene:** design-station's provider keys are keychain references (corrected 2026-11-12 from the live file; the earlier statement that they were inline was wrong); the
    design-station paths have empty `bearer_tokens` (open today); `deploy.yaml` holds an absolute personal path and a host
    name; no `scripts/scan-public` in the repo. Findings only, nothing changed (all since fixed; see the hygiene table).
 10. **Postgres ledger** is a container database published on loopback and a tailnet address, with a Cerberus descriptor
@@ -598,7 +598,7 @@ user unit has them). Entry location: service `hollis-labs`, account `<namespace>
 change the service). **Difference from the old build:** the old platform added a read-through to the legacy service `tether`,
 account `provider-api-key:<namespace>/<key>`; the Substrate secrets module has no option for that. A value that exists only in
 the legacy location (a value stored by an older Tether tool) will not resolve in the new unit. The cutover step: for each keychain
-reference in use (`keychain://station/opencode-go` for usage, `keychain://station/ledger-dsn` for the gateway), the driver
+reference in use, the driver
 checks where the entry lives (attributes only, not values); if it is under `tether`, the owner re-enters it with
 `<unit> secret set <ref>` (stdin, never printed) or it moves to a `file://` reference. A positive-control check, `<unit> secret
 check <ref>`, confirms resolution before the old unit is stopped. Framework ask: `secrets.legacy` config for the read-through.
@@ -618,8 +618,8 @@ reference). `station/ledger-dsn` (a `dsn_ref` form) is therefore not in use by r
 returns to it. `openai/embed`, `anthropic/loom` and `tesseract/mcp-token` are not referenced by the gateway (other callers' keys).
 So the copy set for the gateway is: `keychain://openai/work`, `anthropic/work`, `gemini/work`, `openrouter/work`,
 `huggingface/work`, `typesafe/jev` (`opencode/zen` already exists in the new location). The usage monitor's `go-api` source in the
-example config names `keychain://station/opencode-go`, which exists under neither service (driver); the live reference name for
-that source is still to come from the live config structure.
+example config named `keychain://station/opencode-go`, which is not what is live: the live `go-api` source references
+`keychain://opencode/zen`, which exists under `hollis-labs` and resolves unchanged. The example config is corrected.
 
 **The copy (run by the driver at cutover; the owner re-types nothing).** `scripts/copy-legacy-secrets UNIT REF...` pipes
 `secret-tool lookup service tether username provider-api-key:<ns>/<key>` into `<unit> secret set keychain://<ns>/<key>`, so the value
@@ -638,3 +638,13 @@ SUBSTRATE_CONFIG=<unit override file> COPY_BIN=<llm-gateway binary> COPY_DATA_DI
 legacy entries copied and verified (`25 bytes`, `14 bytes`), an entry already in the new location left alone, a missing legacy entry
 reported with exit 1, a second run idempotent with exit 0, the legacy entry still present afterwards, and the captured output contains
 no value. The rehearsal found one bug (a missing legacy entry ended the script silently under `pipefail`), fixed before commit.
+
+**The keyring work at cutover is exactly the six gateway provider keys** (`openai/work`, `anthropic/work`, `gemini/work`, `openrouter/work`,
+`huggingface/work`, `typesafe/jev`), copied by `scripts/copy-legacy-secrets`; nothing moves for the usage monitor (`opencode/zen`
+is already under `hollis-labs`), the design unit (six `design-suite/*` keys already under `hollis-labs`) or the ledger (a `file://`
+password reference).
+
+**design-station callers.** Both live logical servers (`design-suite`, `tripo`) serve over http with `allowed_origins` and an empty
+`bearer_tokens`: nothing authenticates callers of those two mounts today. After the port each caller needs an identity key with
+`station.design-suite` or `station.tripo`; the callers are the Tether gateway's `design_*` and `tripo_*` entries (the driver routes
+that change at cutover) and anything else the docs name.

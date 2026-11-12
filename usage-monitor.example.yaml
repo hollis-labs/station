@@ -34,7 +34,7 @@ plugins:
       - id: go-api
         account_id: go-workspace
         collector: opencode-go
-        credential_ref: keychain://station/opencode-go
+        credential_ref: keychain://opencode/zen
       - id: gateway-openai
         account_id: openai-api
         collector: gateway
