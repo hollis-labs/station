@@ -116,7 +116,8 @@ func MigrateLegacy(ctx context.Context, dst *store.Store, legacyPath string) (Le
 			}
 			rep.Digests[t.name] = got
 		}
-		return nil
+		// The mark commits with the rows: a database holds history or the mark, never one without the other.
+		return markInitialised(ctx, tx, BeganMigrated)
 	})
 	if err != nil {
 		return LegacyReport{}, fmt.Errorf("copy the old usage database: %w", err)

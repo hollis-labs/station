@@ -568,7 +568,7 @@ under three seconds on the live data. The driver's copies were only read; the sc
 
 **The gateway collector.** The collector calls `GET <gateway_url>/v1/usage/export`, which needs `llm-gateway.usage.read`. The live
 gateway holds only `station-operator` (`llm-gateway.*`) and `station-smoke` (no usage scope), so if a gateway collector is
-configured live it presents the operator's token, or it is not configured. The driver reads the live usage config structure
+configured live it presents the operator's token, or it is not configured. (Correction, 2026-11-13: the live gateway runs with `-gateway-db`, so it authenticates with the active revision's `clients` (five, including `station-management`, `station-usage-monitor` and `nanite`), not the keys file; see docs/cutover-plan.md section 12.) The driver reads the live usage config structure
 (source ids and collectors, no values) to say which. In the new design it holds its own key `usage-collector` with the one
 scope it needs, issued by the gateway and stored in a file or keychain reference named by `credential_ref`. An earlier draft of
 `scripts/first-run` created a `gateway-usage-reader` key on the usage unit; that was wrong (the usage unit's keys do not

@@ -129,7 +129,7 @@ Layout (module `github.com/hollis-labs/station`, one Go module, three binaries):
 |---|---|
 | `cmd/station` (was `cmd/station-next`) | MCP host: avatar-station and design-station are two units of this binary |
 | `cmd/llm-gateway` | the LLM gateway service (section 11) |
-| `cmd/usage-monitor` | usage monitor (not written yet) |
+| `cmd/usage-monitor` | the usage monitor service |
 | `internal/appboot`, `internal/appdirs`, `internal/appcmd` | shared boot hook and command plan, per-app data directory, shared `secret` command |
 | `internal/host`, `internal/settings` | the MCP engine inside a Substrate service |
 | `internal/llmgateway` | gateway package: relay, policy, budgets, catalog, ledger, management store |
@@ -176,7 +176,7 @@ design-station serve over HTTP paths. Who launches a stdio Station today is not 
 check the live configs and the Tether gateway entries. Whether a locally launched stdio process needs an identity key or
 runs under filesystem trust is a program-wide question with the owner and is not settled here.
 
-## 10. Evidence status of the plan in section 8 (cmd/station-next)
+## 10. Evidence status of the plan in section 8 (`cmd/station`)
 
 | Item | Status | Where |
 |---|---|---|

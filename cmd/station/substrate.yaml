@@ -1,7 +1,5 @@
 # Station (the MCP host) on Substrate. The manifest is the shell: modules and config.
 # Secure by default: the guard enforces and the host is its own identity provider.
-# Temporary directory name: this replaces cmd/station when the llm-gateway and
-# usage-monitor have their own binaries (see docs/conversion-notes.md).
 app: station
 variant: service
 profiles: [minimal]

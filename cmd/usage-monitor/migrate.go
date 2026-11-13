@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -16,6 +17,28 @@ import (
 // continuously, so the procedure is a write pause, not a delta pass: stop the old unit, take an
 // online-backup copy of its usage.db, run this against a new data directory, check the report, start
 // this unit. What the old unit would have collected during the pause is not recoverable.
+// initCmd marks an empty database as a unit that starts with no history: the alternative to migrate-from for
+// a fresh install. `serve` refuses a database that has neither.
+func (m *monitor) initCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "init",
+		Short: "Mark this database as starting with no history (the alternative to migrate-from); serve needs one or the other",
+		Args:  cobra.NoArgs,
+		RunE: func(c *cobra.Command, _ []string) error {
+			st := database.From(m.app)
+			if st == nil {
+				return errNoModules
+			}
+			how, err := usagemonitor.Init(c.Context(), st)
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(c.OutOrStdout(), "usage-monitor: database began as %q\n", how)
+			return err
+		},
+	}
+}
+
 func (m *monitor) migrateCmd() *cobra.Command {
 	var oldDB string
 	c := &cobra.Command{

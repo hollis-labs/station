@@ -5,12 +5,14 @@ artifact: {name: "station-{sha12}", tarball: "station_{version}_{os}_{arch}.tar.
 targets:
   # The MCP host runs as two units from one binary; each has its own config file and data directory (identity and
   # database), so the two never share state. The binaries they replace are plain files: the first deploy keeps each as
-  # <name>.pre-fleet-install, which is the rollback. WorkingDirectory is left as the Cerberus unit has it.
+  # <name>.pre-fleet-install, which is the rollback. Each target has its OWN install_root: the installer keeps one state file per
+  # root and takes that copy only when the root has no current release, so a shared root would skip it for the second target
+  # (and for both, if the old Station release already lives there). WorkingDirectory is left as the Cerberus unit has it.
   - id: agent-os-avatar-station
     when: {os: linux, arch: amd64}
     hosts: [agent-os]
     binary: station
-    install_root: ~/.local/share/fleet/releases/station
+    install_root: ~/.local/share/fleet/releases/station-avatar
     symlinks:
       - path: ~/.local/libexec/station/station
     unit_dropins:
@@ -31,7 +33,7 @@ targets:
     when: {os: linux, arch: amd64}
     hosts: [agent-os]
     binary: station
-    install_root: ~/.local/share/fleet/releases/station
+    install_root: ~/.local/share/fleet/releases/station-design
     symlinks:
       - path: ~/.local/libexec/design-station/station
     unit_dropins:
