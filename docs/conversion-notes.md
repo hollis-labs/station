@@ -473,7 +473,8 @@ reads on one read connection.
 11, observations about 84k, events 67. Rollback loses what the new unit recorded after start. Shutdown is a 10 s drain plus
 10 s for collectors, so the service manager's stop timeout must be above 20 s. Re-provision: reporter keys (push sources are
 bound to `key:<id>`), the gateway collector's credential_ref and gateway URL, and the operator and reader keys
-(`scripts/first-run usage-monitor`).
+(`usage-monitor identity key create`, in the order of docs/cutover-plan.md section 6; not `scripts/first-run`, which also runs `init` and so
+is for a new unit: on a cutover host it would mark the empty database before `migrate-from`).
 
 ## Pin d453ac8: what Station adopts and what it does not
 
