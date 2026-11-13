@@ -129,7 +129,7 @@ variable first: the commands that do create resolve the live directory of the ap
    (for `station`, `--target` names avatar-station or design-station: two targets match the host). Each must print the checksum check,
    the new link, its drop-in (`30-*-exec.conf` for the gateway and usage; `20-fleet-exec.conf` for the two `station` targets), the restart
    and the `/healthz` poll, and skip the preflight while the migrated database does not exist. For each `station` target it must also say
-   that the plain file at the old path would be kept as `<name>.pre-fleet-install` (section 10 quotes the line).
+   its new install root; the dry run does not print the `<name>.pre-fleet-install` copy (section 10), the first real deploy makes it.
    Passed on 2026-11-12 against earlier artifacts of this branch (conversion-notes); repeat on the published ones.
 5. **The ledger answer and the principal list, on the rehearsal copy** (driver, scratch directory, never the live units): `gateway-store
    migrate-from` the day's copy of `gateway.db` into a scratch data directory, then `llm-gateway validate` with the ledger's
@@ -269,7 +269,7 @@ the live proxy's behaviour is read, not assumed). No proxy change is needed othe
 | Public name through the proxy (gateway and usage) | served only from a loopback peer with one `X-Forwarded-Proto: https`; the collector key reaches the usage export |
 | Ambient `HOLLIS_AUTH_*=permissive` | changes nothing (401 without a credential; `/api/me` says `enforce`) |
 | Keyring copy | an isolated gnome-keyring with fake values: copied and verified by length, existing entry left alone, missing entry reported, legacy entry kept, no value in any output |
-| Installer dry runs on the host (nothing changed) | all four targets passed on earlier artifacts of this branch; the two `station` targets are repeated for the per-target roots (quoted below) |
+| Installer dry runs on the host (nothing changed) | all four targets passed on earlier artifacts of this branch; the four were repeated on 2026-11-13 against `workflow_dispatch` run 43338479890 (head `b177773`). Each `station` target now reads `install: would place .../releases/station-avatar/<version>/station` (or `station-design`) and `dropin: would write .../<unit>.service.d/20-fleet-exec.conf`, with no state in the new root. **The dry run prints no line about keeping the old file as `<name>.pre-fleet-install`**: that copy is made by the first real deploy, so it is proved only then (hand copy of step zero 3 stays). The gateway and usage runs print `preflight ... does not exist yet, skipped`, the `30-` drop-in, the restart and the health poll; nothing was created under `releases/` |
 | Rollback, both shapes, on throwaway units | MCP shape: old, new, old again; gateway/usage shape: old, new, old again (section 11) |
 | Revision 10 on the copy | policy `enforce`/default `allow`, no rules, no budgets; five clients; ledger block structured with a `file://` password reference (section 12) |
 
