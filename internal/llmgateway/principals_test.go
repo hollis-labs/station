@@ -12,6 +12,8 @@ func TestUnmatchedPrincipals(t *testing.T) {
 			{ID: "old-client", Principal: "jev-client"},
 			{ID: "all-keys", Principal: "key:*"},
 			{ID: "one-key", Principal: "key:k_abc"},
+			{ID: "star", Principal: "*"},
+			{ID: "users", Principal: "user:*"},
 		}},
 		Budgets: []BudgetConfig{{ID: "ci", Principal: "ci-*"}, {ID: "all"}},
 	}
@@ -26,6 +28,7 @@ func TestUnmatchedPrincipals(t *testing.T) {
 			t.Errorf("unexpected %s in:\n%s", not, got)
 		}
 	}
+	// `*` and `user:*` can match a signed-in user, so they are never reported; named keys and old names are.
 	if got := UnmatchedPrincipals(cfg, nil); len(got) != 4 {
 		t.Errorf("with no keys every named principal is unmatched: %v", got)
 	}

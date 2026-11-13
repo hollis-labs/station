@@ -53,13 +53,13 @@ data directory before that unit's `migrate-from` (step zero 1 checks this), and 
 - One command per binary replaces `station serve -api-only -api-config ...`: `llm-gateway serve`, `usage-monitor serve`,
   `station serve`. Flags are gone; each unit reads one override file (`SUBSTRATE_CONFIG`) and one data directory.
 - Management and usage API errors are the flat `{code, message}`; the relay's errors are the provider's own, untouched.
-- Usage push sources are bound to `key:<id>` principals (the key id from `GET /api/identity/keys`), not a client name.
+- Usage push sources are bound to `key:<id>` principals (the key id that `identity key create --out` prints), not a client name.
 - Ports are unchanged: 8097 (avatar), 8110 (design), 18082 (gateway), 18083 (usage). All are loopback only.
 - The data is copied, not shared: gateway revisions and usage history are copied into new databases by `migrate-from`; the old
   files are never written (rollback keeps them).
 - The two MCP-host binaries are plain files today; the installer keeps each as `<name>.pre-fleet-install`.
 - Shutdown takes longer: the service manager's stop timeout is 40 s (gateway), 35 s (usage), 30 s (MCP hosts); no `KillMode=process`.
-- The credential store: six gateway provider keys are copied from the legacy keyring location (section 6, step 7).
+- The credential store: six gateway provider keys are copied from the legacy keyring location (section 6, llm-gateway step 4).
 
 ## 2. What runs today (read from the host by the driver, names only)
 
@@ -99,7 +99,7 @@ release, so each MCP target has its own root (`releases/station-avatar`, `releas
 
 ## 4. Step zero: before anything else, with nothing changed
 
-Only these commands create anything: `identity setup`, `identity key create`, `migrate-from` and `gateway-store stage|activate|migrate-from`
+Only these commands create anything: `identity setup`, `identity key create`, `migrate-from`, `usage-monitor init` and `gateway-store stage|activate|migrate-from`
 (the data directory, the database and the signing key), and `secret set` (the directory only). `serve`, `validate`, the `gateway-store`
 reads, `--help`, a bare command and **any line that is not exactly one of the commands above with the flags it needs** create nothing and
 start no module that opens a file; `serve` and `validate` also refuse a data directory with no database before anything runs. The tests
@@ -134,7 +134,7 @@ variable first: the commands that do create resolve the live directory of the ap
 5. **The ledger answer and the principal list, on the rehearsal copy** (driver, scratch directory, never the live units): `gateway-store
    migrate-from` the day's copy of `gateway.db` into a scratch data directory, then `llm-gateway validate` with the ledger's
    credential file reachable. Expected: either `llm-gateway: OK, revision <n>, <r> route(s), 0 live key(s)` (the ledger opened in
-   verify mode as the runtime login, so its password reference resolves) or the principal lines of step 6a of section 6 and nothing
+   verify mode as the runtime login, so its password reference resolves) or the principal lines (`names principal ..., which no issued key can produce`) and nothing
    else; a secret or connection error is the ledger answer and must be settled before the window. Then `gateway-store show --output`
    and list every `principal` in `policy.rules` and `budgets`. On the 2026-11-12 copy (revision 10): policy `enforce`, default effect
    `allow`, **no rules and no budgets**, so nothing names a principal and nothing needs rewriting; the ledger block is structured with a
@@ -234,7 +234,7 @@ export USAGE_MONITOR_DATA_DIR=$HOME/.local/share/usage-monitor         # LLM_GAT
 5. Through the public name via the proxy: gateway `GET /api/llm-gateway/v1/models` with an authorised key lists models and is 401 without one;
    the usage monitor's `GET /api/usage-monitor/v1/accounts` lists the 11 accounts; a request to the public name with a different `Host` is 403.
 6. Gateway only: one chat request through each live dialect reaches its provider; an upstream error body arrives as the provider sent it;
-   a row appears in the PostgreSQL ledger; `GET /api/llm-gateway/v1/management/status` shows `running_revision` 10 and `restart_required: false`.
+   a row appears in the PostgreSQL ledger; `GET /api/llm-gateway/v1/management/status` shows `running_revision` equal to the revision activated in step 6 (10 if nothing was restaged) and `restart_required: false`.
 7. Usage only: `observations` count not lower than at migration; the next gateway collector pull records an observation; a push reporter's
    ingest succeeds with its own key and is refused (`source_forbidden`) with another.
 8. MCP hosts: each logical server's `/healthz` check is up; a tool call through the Tether gateway with the new key succeeds, and without a key is 401.
@@ -293,7 +293,8 @@ release, and on a first deploy of the gateway or the usage monitor there is none
 | avatar-station | `20-fleet-exec.conf` (the descriptor's; the unit had no drop-in before) | remove the symlink at the old path and `mv <path>.pre-fleet-install <path>` | `daemon-reload`, start the old unit |
 | design-station | `20-fleet-exec.conf` | the same, for its own path | `daemon-reload`, start the old unit |
 
-For the MCP hosts both parts are needed: removing only the drop-in starts the new binary's link with the old arguments, and restoring only the
+If the first MCP deploy fails its own health check, the installer's automatic rollback relinks the old binary but leaves `20-fleet-exec.conf`, so
+the old binary starts with a bare `serve`; this table recovers it (remove the drop-in, put the kept file back). For the MCP hosts both parts are needed: removing only the drop-in starts the new binary's link with the old arguments, and restoring only the
 file leaves the new `ExecStart`. Read `ls -l <path>` before the `mv`. The hand copy of step zero 3 is the second safety. Each MCP target has its
 own install root, so one host's rollback never depends on the other.
 

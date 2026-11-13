@@ -17,7 +17,7 @@ import (
 // continuously, so the procedure is a write pause, not a delta pass: stop the old unit, take an
 // online-backup copy of its usage.db, run this against a new data directory, check the report, start
 // this unit. What the old unit would have collected during the pause is not recoverable.
-// initCmd marks an empty database as a unit that starts with no history: the alternative to migrate-from for
+// initCmd marks an empty database (no rows in the history tables) as a unit that starts with no history: the alternative to migrate-from for
 // a fresh install. `serve` refuses a database that has neither.
 func (m *monitor) initCmd() *cobra.Command {
 	return &cobra.Command{

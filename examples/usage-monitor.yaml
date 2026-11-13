@@ -24,7 +24,10 @@ usage-monitor:
       gateway_url: https://gateway.example.test/api/llm-gateway
       # a gateway key holding only llm-gateway.usage.read (created with llm-gateway identity key create)
       credential_ref: file:///private/station/usage/gateway-usage.token
-    - id: laptop-claude
-      account_id: claude-personal
-      collector: push
-      principal: key:k_REPLACE_WITH_THE_REPORTERS_KEY_ID   # the key id from GET /api/identity/keys
+    # A push reporter: create its key (`usage-monitor identity key create --name laptop --scope usage-monitor.ingest --out <file>`),
+    # which prints the key id, and name that id here. `validate` refuses a push source whose principal no live key can produce,
+    # so this stays commented out until the key exists.
+    # - id: laptop-claude
+    #   account_id: claude-personal
+    #   collector: push
+    #   principal: key:<the id printed by identity key create>

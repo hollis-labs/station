@@ -132,6 +132,11 @@ func TestFirstRunScript(t *testing.T) {
 	if strings.Contains(out, "a long test passphrase") {
 		t.Fatal("the password appears in the script output")
 	}
+	if !strings.Contains(out, "(init)") {
+		t.Fatalf("first-run did not mark the database:\n%s", out)
+	}
+	s := u.serveUnmarked() // a new unit serves right after first-run
+	s.stop(t)
 	for _, c := range []string{"usage-operator", "usage-reader"} {
 		f := filepath.Join(keys, c+".key")
 		st, err := os.Stat(f)
@@ -240,6 +245,46 @@ func TestValidateRefusesAPushSourceNoKeyCanProduce(t *testing.T) {
 	writeConfig(t, u, source("key:"+id))
 	if out := u.mustRun("", "validate"); !strings.Contains(out, "OK") || !strings.Contains(out, "1 live key(s)") {
 		t.Fatalf("validate with the key's principal: %s", out)
+	}
+}
+
+// The shipped example, as the README's quickstart uses it, validates and serves once a unit is set up with
+// an owner, a key and `init`; and `init` refuses a database that already holds history without a mark.
+func TestShippedExampleValidatesAndInitRefusesHistory(t *testing.T) {
+	example, err := os.ReadFile("../../examples/usage-monitor.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := newUnit(t, "")
+	// The example's own settings, with the test's port and a cheap password hash.
+	body := strings.Replace(string(example), `addr: "127.0.0.1:18083"`, `addr: "`+u.addr+`"`, 1) + "\nidentity:\n  bcrypt_cost: 4\n"
+	body = strings.Replace(body, "identity:\n  trusted_proxy: true      # only when a local TLS proxy forwards the public name\n", "", 1)
+	if err := os.WriteFile(u.cfg, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	u.mustRun(ownerPassphrase+"\n", "identity", "setup", "--username", "owner")
+	u.mustRun("", "identity", "key", "create", "--name", "reader", "--scope", "usage-monitor.read", "--out", filepath.Join(t.TempDir(), "r.key"))
+	if out, err := u.run("", "serve"); err == nil || !strings.Contains(out, "has not been initialised") {
+		t.Fatalf("serve before init: %v\n%s", err, out)
+	}
+	u.mustRun("", "init")
+	if out := u.mustRun("", "validate"); !strings.Contains(out, "OK") {
+		t.Fatalf("validate of the shipped example: %s", out)
+	}
+	s := u.serveUnmarked()
+	s.stop(t)
+
+	// A database that holds history and no mark is not marked by init.
+	h := newUnit(t, "")
+	writeConfig(t, h, bootstrapAccounts)
+	h.mustRun(ownerPassphrase+"\n", "identity", "setup", "--username", "owner")
+	db := filepath.Join(h.dir, "usage-monitor.db")
+	cmd := exec.Command("sqlite3", db, "INSERT INTO accounts(id,revision,document) VALUES('x',1,'{}')")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Skipf("sqlite3 is not available to seed a row: %v %s", err, out)
+	}
+	if out, err := h.run("", "init"); err == nil || !strings.Contains(out, "already has rows in accounts") {
+		t.Fatalf("init on a database with history: %v\n%s", err, out)
 	}
 }
 
