@@ -19,10 +19,12 @@ confirm which of the two the old unit really used before the window (`llm-gatewa
 **Rollback for the ledger is nothing to undo.** Rows the new gateway wrote are valid for the old build (the same columns: the old-versus-new comparison, 18 columns, passed on the #28 head; its test was deleted with the old gateway in #29, so
 nothing on `main` guards the claim any more. **The cutover therefore deploys the build of `2f6f6b0f` (main after #29) or of a later commit
 whose ledger code is byte-identical to it** (`git diff 2f6f6b0f..<commit> -- internal/llmgateway/store_pg.go internal/llmgateway/ledger.go
-internal/llmgateway/migrations` is empty: checked for the head of the pull request that carries this paragraph, and to be checked again on
-the merge commit); otherwise the comparison is re-proved first. The `2f6f6b0f` build is run 43336002026 with artifacts
+internal/llmgateway/migrations` is empty: checked on `7f226c3c`, the build of section 5 step 1. Between the two, `internal/llmgateway` and
+`cmd/llm-gateway` differ only in `cmd/llm-gateway/serve.go` (`validate` also checks principals), `cmd/llm-gateway/store.go` (`ledger-migrate`
+checks `--owner-role` before looking for the secrets module), `internal/llmgateway/principals.go` and their tests; none of them is on the path
+that writes ledger rows); otherwise the comparison is re-proved first. The `2f6f6b0f` build is run 43336002026 with artifacts
 `station-2f6f6b0fd821`, `llm-gateway-2f6f6b0fd821`, `usage-monitor-2f6f6b0fd821`; it has no `init` mark or validate checks, so the build to
-deploy is the later one: its run and three artifacts are written into section 5, step 1 when it exists); the old unit simply
+deploy is the later one named in section 5, step 1); the old unit simply
 reads and appends to the same tables. A `pg_dump -Fc` is taken in step zero as a safety copy, not because the plan needs a restore. What is lost on rollback is in section 11.
 
 ## 1. What changes for the owner
@@ -118,9 +120,9 @@ variable first: the commands that do create resolve the live directory of the ap
 
 ## 5. Before the window (anyone, no downtime)
 
-1. Merge the pull request (CI green on `main`). Record the commit and the run id of the `push` build on `main` (one run, three artifacts:
-   `station-<sha12>`, `llm-gateway-<sha12>`, `usage-monitor-<sha12>`); that run id is the `--run` of every deploy, and the sha is the one section 0
-   compares against `2f6f6b0f`.
+1. **The build to deploy** is the `push` build on `main` at `7f226c3c86ee3e3aa581d01e09b1dd21251c36d1` (merge of #31): run **43342055647**, three
+   artifacts `station-7f226c3c86ee`, `llm-gateway-7f226c3c86ee`, `usage-monitor-7f226c3c86ee` (version `v0.1.0-64-g7f226c3`). That run id is the
+   `--run` of every deploy. If `main` moves before the window, the new push run replaces it here and section 0's file check is repeated.
 2. Rehearse on a fresh copy in a scratch directory with `HOME`, `XDG_*` and every `*_DATA_DIR` pointed there (section 10).
    Counts match; the copy's checksum unchanged.
 3. Prepare, without applying: the four override files (section 6, step 3), the proxy edit (section 9), the Cerberus descriptor edit
@@ -272,7 +274,7 @@ the live proxy's behaviour is read, not assumed). No proxy change is needed othe
 | Public name through the proxy (gateway and usage) | served only from a loopback peer with one `X-Forwarded-Proto: https`; the collector key reaches the usage export |
 | Ambient `HOLLIS_AUTH_*=permissive` | changes nothing (401 without a credential; `/api/me` says `enforce`) |
 | Keyring copy | an isolated gnome-keyring with fake values: copied and verified by length, existing entry left alone, missing entry reported, legacy entry kept, no value in any output |
-| Installer dry runs on the host (nothing changed) | all four targets passed on earlier artifacts of this branch; the four were repeated on 2026-11-13 against `workflow_dispatch` run 43338479890 (head `b177773`). Each `station` target now reads `install: would place .../releases/station-avatar/<version>/station` (or `station-design`) and `dropin: would write .../<unit>.service.d/20-fleet-exec.conf`, with no state in the new root. **The dry run prints no line about keeping the old file as `<name>.pre-fleet-install`**: that copy is made by the first real deploy, so it is proved only then (hand copy of step zero 3 stays). The gateway and usage runs print `preflight ... does not exist yet, skipped`, the `30-` drop-in, the restart and the health poll; nothing was created under `releases/` |
+| Installer dry runs on the host (nothing changed) | all four targets passed on earlier artifacts of this branch; repeated on 2026-11-13 against the deploy build, run 43342055647 (`7f226c3c`): all four `dry-run complete: ok`, same lines as below, version `v0.1.0-64-g7f226c3`, nothing created under `releases/`. The earlier run was `workflow_dispatch` 43338479890 (head `b177773`). Each `station` target now reads `install: would place .../releases/station-avatar/<version>/station` (or `station-design`) and `dropin: would write .../<unit>.service.d/20-fleet-exec.conf`, with no state in the new root. **The dry run prints no line about keeping the old file as `<name>.pre-fleet-install`**: that copy is made by the first real deploy, so it is proved only then (hand copy of step zero 3 stays). The gateway and usage runs print `preflight ... does not exist yet, skipped`, the `30-` drop-in, the restart and the health poll; nothing was created under `releases/` |
 | Rollback, both shapes, on throwaway units | MCP shape: old, new, old again; gateway/usage shape: old, new, old again (section 11) |
 | Revision 10 on the copy | policy `enforce`/default `allow`, no rules, no budgets; five clients; ledger block structured with a `file://` password reference (section 12) |
 
