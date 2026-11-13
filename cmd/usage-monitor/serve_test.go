@@ -49,7 +49,15 @@ type served struct {
 	base   string
 }
 
+// serve starts the service on a database that began with `init` (a no-op after migrate-from). The
+// guard itself is tested with serveUnmarked.
 func (u *unit) serve() *served {
+	u.t.Helper()
+	u.mustRun("", "init")
+	return u.serveUnmarked()
+}
+
+func (u *unit) serveUnmarked() *served {
 	u.t.Helper()
 	s := &served{stderr: &strings.Builder{}, exited: make(chan error, 1), base: "http://" + u.addr}
 	s.cmd = u.command("", "serve")

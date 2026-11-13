@@ -19,6 +19,7 @@ import (
 	"github.com/hollis-labs/substrate/modules/identity"
 	"github.com/hollis-labs/substrate/modules/secrets"
 
+	"github.com/hollis-labs/station/internal/appcmd"
 	"github.com/hollis-labs/station/internal/hostguard"
 	"github.com/hollis-labs/station/internal/llmgateway"
 )
@@ -100,7 +101,20 @@ func (g *gateway) validateCmd() *cobra.Command {
 				return err
 			}
 			defer func() { _ = svc.Close(context.Background()) }()
-			_, err = fmt.Fprintf(c.OutOrStdout(), "llm-gateway: OK, revision %d, %d route(s)\n", rev, len(svc.Routes()))
+			// Callers are identity keys (principal ids `key:<id>`): a rule or budget that names anything else
+			// silently stops matching. Run validate after the keys are issued.
+			active, err := llmgateway.NewManagementStore(database.From(g.app)).Active(c.Context())
+			if err != nil {
+				return err
+			}
+			principals, err := appcmd.IssuedKeyPrincipals(c.Context(), database.From(g.app))
+			if err != nil {
+				return err
+			}
+			if bad := llmgateway.UnmatchedPrincipals(active.Document.Gateway, principals); len(bad) > 0 {
+				return fmt.Errorf("revision %d does not apply to the callers this unit has (%d live key(s)); issue the keys first or edit the revision:\n  %s", rev, len(principals), strings.Join(bad, "\n  "))
+			}
+			_, err = fmt.Fprintf(c.OutOrStdout(), "llm-gateway: OK, revision %d, %d route(s), %d live key(s)\n", rev, len(svc.Routes()), len(principals))
 			return err
 		},
 	}

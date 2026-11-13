@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -18,6 +19,7 @@ import (
 	"github.com/hollis-labs/substrate/modules/identity"
 	"github.com/hollis-labs/substrate/modules/secrets"
 
+	"github.com/hollis-labs/station/internal/appcmd"
 	"github.com/hollis-labs/station/internal/hostguard"
 	"github.com/hollis-labs/station/internal/usagemonitor"
 )
@@ -75,11 +77,19 @@ func (m *monitor) validateCmd() *cobra.Command {
 		Short: "Check the configuration against the existing database, writing nothing and fetching nothing",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			svc, _, err := m.start(c.Context(), true)
+			svc, cfg, err := m.start(c.Context(), true)
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprintf(c.OutOrStdout(), "usage-monitor: OK, %d route(s)\n", len(svc.Routes()))
+			// A push source accepts only the key it names (`key:<id>`); run validate after the keys are issued.
+			principals, err := appcmd.IssuedKeyPrincipals(c.Context(), database.From(m.app))
+			if err != nil {
+				return err
+			}
+			if bad := usagemonitor.UnmatchedPushPrincipals(cfg.Config, principals); len(bad) > 0 {
+				return fmt.Errorf("a push reporter would be refused (%d live key(s)); issue its key and set the source's principal to key:<id>:\n  %s", len(principals), strings.Join(bad, "\n  "))
+			}
+			_, err = fmt.Fprintf(c.OutOrStdout(), "usage-monitor: OK, %d route(s), %d live key(s)\n", len(svc.Routes()), len(principals))
 			return err
 		},
 	}
@@ -97,6 +107,9 @@ func (m *monitor) serve(ctx context.Context) error {
 	id := identity.From(app)
 	if id == nil {
 		return errNoModules
+	}
+	if err := usagemonitor.RequireInitialised(ctx, database.From(app)); err != nil {
+		return err
 	}
 	svc, cfg, err := m.start(ctx, false)
 	if err != nil {

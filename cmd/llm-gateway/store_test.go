@@ -127,6 +127,57 @@ func TestMigrateFromOldGatewayDatabase(t *testing.T) {
 	}
 }
 
+// The plan runs the identity sitting before the window, so the new database holds the owner when
+// `migrate-from` runs. The migration must work on it, and a key made afterwards must still work.
+func TestMigrateFromAfterIdentitySetup(t *testing.T) {
+	u := newUnit(t, "")
+	u.mustRun(ownerPassphrase+"\n", "identity", "setup", "--username", "owner")
+	old := filepath.Join(t.TempDir(), "old", "gateway.db")
+	writeLegacy(t, old, gatewayDoc(t))
+	u.mustRun("", "gateway-store", "migrate-from", "--old-db", old)
+	var status struct {
+		Latest int64 `json:"latest_revision"`
+		Active int64 `json:"active_revision"`
+	}
+	if err := json.Unmarshal([]byte(u.mustRunStdout("", "gateway-store", "status")), &status); err != nil || status.Latest != 1 || status.Active != 1 {
+		t.Fatalf("status after migrating onto an owner-only database: %+v %v", status, err)
+	}
+	if out := u.mustRunStdout("", "validate"); !strings.Contains(out, "OK, revision 1") {
+		t.Fatalf("validate: %s", out)
+	}
+	// `--out` prints the key's id: the plan takes principal ids from it.
+	id := strings.TrimSpace(u.mustRunStdout("", "identity", "key", "create", "--name", "ops", "--scope", "llm-gateway.chat", "--out", filepath.Join(t.TempDir(), "ops.key")))
+	if !strings.HasPrefix(id, "k_") {
+		t.Fatalf("key create --out printed %q, want the key id", id)
+	}
+	if out, err := u.run("", "gateway-store", "migrate-from", "--old-db", old); err == nil || !strings.Contains(out, "already has rows") {
+		t.Fatalf("a second migration: %v\n%s", err, out)
+	}
+}
+
+// Rules and budgets match the caller's principal id, and callers are identity keys (`key:<id>`). A
+// revision that still names an old client id stops applying without any error at request time, so
+// `validate` refuses it. The check needs the keys, so it is run after they are issued.
+func TestValidateRefusesAPrincipalNoKeyCanProduce(t *testing.T) {
+	u := newUnit(t, "")
+	doc := strings.Replace(gatewayDoc(t), `"models":[`, `"policy":{"mode":"enforce","default_effect":"deny","rules":[{"id":"jev","principal":"jev-client","effect":"allow"}]},"budgets":[{"id":"ci","scope":"principal","principal":"ci-*","window":"day","max_usd":5}],"models":[`, 1)
+	u.mustRun("", "gateway-store", "stage", "--input", writeFile(t, "doc.json", doc), "--expected", "0", "--actor", "test")
+	u.mustRun("", "gateway-store", "activate", "--revision", "1", "--expected", "0", "--actor", "test")
+	u.mustRun(ownerPassphrase+"\n", "identity", "setup", "--username", "owner")
+	id := strings.TrimSpace(u.mustRunStdout("", "identity", "key", "create", "--name", "jev", "--scope", "llm-gateway.chat", "--out", filepath.Join(t.TempDir(), "jev.key")))
+	out, err := u.run("", "validate")
+	if err == nil || !strings.Contains(out, `policy rule "jev"`) || !strings.Contains(out, `budget "ci"`) || strings.Contains(out, id) {
+		t.Fatalf("validate with rules naming old clients: %v\n%s", err, out)
+	}
+	// Rewritten to the key's principal id and to a glob over keys, the revision applies.
+	fixed := strings.NewReplacer(`"jev-client"`, `"key:`+id+`"`, `"ci-*"`, `"key:*"`).Replace(doc)
+	u.mustRun("", "gateway-store", "stage", "--input", writeFile(t, "fixed.json", fixed), "--expected", "1", "--actor", "test")
+	u.mustRun("", "gateway-store", "activate", "--revision", "2", "--expected", "1", "--actor", "test")
+	if out := u.mustRunStdout("", "validate"); !strings.Contains(out, "OK, revision 2") || !strings.Contains(out, "1 live key(s)") {
+		t.Fatalf("validate after the rewrite: %s", out)
+	}
+}
+
 // A service never opens an old gateway.db as its own database, whatever its path.
 func TestServiceRefusesOldGatewayDatabase(t *testing.T) {
 	u := newUnit(t, "")

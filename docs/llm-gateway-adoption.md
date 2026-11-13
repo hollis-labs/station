@@ -66,12 +66,13 @@ Scopes:
 | `llm-gateway.management.*` | All management permissions; credential grants also require the scopes being granted |
 | `llm-gateway.*` | All gateway permissions, including management; reserve for trusted administrators |
 
-Keys the host runs with: an operator key (explicit inference, model, catalog and usage scopes), a management key (management scopes and the
-explicit scopes it may grant), a smoke-test key and the usage monitor's collector key (`llm-gateway.usage.read` only). None of them is
-an app key.
+Keys the host runs with: an operator key (inference, models, catalog and usage read), a separate management key (`management.read`,
+`.write`, `.activate`), a smoke-test key and the usage monitor's collector key (`llm-gateway.usage.read` only). None of them is an
+app key; an app such as a chat client gets its own key with only the scopes it uses. Do not give the management pair to a key
+that is not meant to read every credential the gateway can resolve.
 
-Revoke a key with `DELETE /api/identity/keys/<id>` (administrator) or by an offline `identity` command run against the stopped unit. In-flight
-work can finish during graceful shutdown. Operator keys can read all usage; ordinary app keys cannot. Tether-issued JWTs are not accepted.
+Revoke a key with `DELETE /api/identity/keys/<id>` as a signed-in administrator; revocation is API only (the offline commands are `identity setup`
+and `identity key create`, nothing else). In-flight work can finish during graceful shutdown. Operator keys can read all usage; ordinary app keys cannot. Tether-issued JWTs are not accepted.
 
 ## Identity and conversations
 

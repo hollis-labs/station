@@ -70,6 +70,8 @@ func TestPlan(t *testing.T) {
 		{[]string{"secret", "set", "file://a/b"}, pick(appboot.WithSecrets), appboot.ModeDir},
 		{[]string{"secret", "set"}, ro, appboot.ModeRead},
 		{[]string{"secret", "set", "a", "b"}, ro, appboot.ModeRead},
+		{[]string{"init"}, pick(appboot.WithDatabase), appboot.ModeCreate},
+		{[]string{"init", "extra"}, ro, appboot.ModeRead},
 		{[]string{"validate"}, pick(appboot.WithDatabaseSecrets), appboot.ModeRead},
 		{[]string{"validate", "extra"}, ro, appboot.ModeRead},
 		{[]string{"migrate-from", "--old-db", "/x/usage.db"}, pick(appboot.WithDatabase), appboot.ModeCreate},
@@ -124,6 +126,7 @@ func TestReadOnlyCommandsCreateNothing(t *testing.T) {
 		{[]string{"help"}, ""},
 		{[]string{"secret", "check", "file://ns/missing"}, "not_found"},
 		{[]string{"validate"}, "no database"},
+		{[]string{"init", "extra"}, "*"},
 	} {
 		home := t.TempDir()
 		out, err := run(home, "", tc.args...)

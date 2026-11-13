@@ -50,7 +50,7 @@ func run(ctx context.Context, getenv func(string) string, args []string) error {
 func (m *monitor) root(ctx context.Context, args []string) *cobra.Command {
 	rootCmd := cli.Root(m.app)
 	rootCmd.SetArgs(args) // the same words plan() looked at
-	rootCmd.AddCommand(m.serveCmd(ctx), m.validateCmd(), m.migrateCmd(), appcmd.Secret(m.app))
+	rootCmd.AddCommand(m.serveCmd(ctx), m.validateCmd(), m.migrateCmd(), m.initCmd(), appcmd.Secret(m.app))
 	if help := appcmd.IdentityHelp(m.app); help != nil {
 		rootCmd.AddCommand(help)
 	}

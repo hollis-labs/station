@@ -13,6 +13,7 @@ func plan(args []string) (modules []string, mode appboot.Mode) {
 	return appboot.Plan(args, substrateModules, map[string]appboot.Cmd{
 		"migrate-from": {Modules: appboot.WithDatabase, Mode: appboot.ModeCreate,
 			Flags: []string{"old-db"}, Required: []string{"old-db"}},
+		"init":     {Modules: appboot.WithDatabase, Mode: appboot.ModeCreate},
 		"validate": {Modules: appboot.WithDatabaseSecrets},
 	})
 }

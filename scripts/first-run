@@ -96,3 +96,6 @@ for entry in "${clients[@]}"; do
   made=$((made + 1))
 done
 echo "first-run: $unit: done (owner $owner, $made new key file(s) of ${#clients[@]})"
+if [ "$unit" = usage-monitor ]; then
+  echo "first-run: usage-monitor: serve refuses this database until it is marked: run 'usage-monitor migrate-from --old-db <copy>' to bring history over, or 'usage-monitor init' for a unit with none"
+fi

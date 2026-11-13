@@ -32,5 +32,5 @@ jobs:
       - name: Public hygiene (tree)
         # The history gate (--ref HEAD) returns after the program-wide history pass.
         run: go run github.com/hollis-labs/substrate/cmd/substrate scan-public --tree
-      - name: Tests with real Station and plugin children
+      - name: Tests with the real binaries
         run: go test -race -count=1 -timeout 4m ./...

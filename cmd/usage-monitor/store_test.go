@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hollis-labs/libs/core/store"
 )
@@ -180,6 +181,65 @@ func TestFirstRunScript(t *testing.T) {
 		if name != lost && body != before[name] {
 			t.Fatalf("%s was rewritten", name)
 		}
+	}
+}
+
+// A database that holds only an owner and keys is not started: it would seed the configured accounts
+// and `migrate-from` would then refuse. `serve` needs the mark that `migrate-from` or `init` writes.
+func TestServeRefusesADatabaseNothingInitialised(t *testing.T) {
+	u := newUnit(t, "")
+	writeConfig(t, u, bootstrapAccounts)
+	u.mustRun(ownerPassphrase+"\n", "identity", "setup", "--username", "owner")
+	u.mustRunStdout("", "identity", "key", "create", "--name", "reader", "--scope", "usage-monitor.read", "--stdout")
+	c := u.command("", "serve")
+	timer := time.AfterFunc(20*time.Second, func() { _ = c.Process.Kill() }) // a serve that is not refused would listen forever
+	outb, err := c.CombinedOutput()
+	timer.Stop()
+	out := string(outb)
+	if err == nil || !strings.Contains(out, "has not been initialised") || !strings.Contains(out, "migrate-from") {
+		t.Fatalf("serve on an owner-only database: %v\n%s", err, out)
+	}
+	// The refusal seeded nothing, so the migration that follows is accepted and writes the mark.
+	old := filepath.Join(t.TempDir(), "old", "usage.db")
+	writeLegacy(t, old)
+	u.mustRun("", "migrate-from", "--old-db", old)
+	s := u.serveUnmarked()
+	s.stop(t)
+}
+
+// `init` is the explicit start with no history, and repeating it changes nothing; after it the
+// migration is still accepted only if the tables are empty, and keeps the first mark.
+func TestInitMarksAFreshDatabase(t *testing.T) {
+	u := newUnit(t, "")
+	if out := u.mustRun("", "init"); !strings.Contains(out, `"init"`) {
+		t.Fatalf("init: %s", out)
+	}
+	if out := u.mustRun("", "init"); !strings.Contains(out, `"init"`) {
+		t.Fatalf("a second init: %s", out)
+	}
+	s := u.serveUnmarked()
+	s.stop(t)
+}
+
+// A push source accepts only the key it names. A source copied from the old configuration names a
+// client name, which no key can be: `validate` refuses it (run after the keys are issued) and passes once the
+// source names the key id that `identity key create --out` printed.
+func TestValidateRefusesAPushSourceNoKeyCanProduce(t *testing.T) {
+	u := newUnit(t, "")
+	source := func(principal string) string {
+		return bootstrapAccounts + "  sources:\n    - {id: laptop, account_id: claude, collector: push, principal: " + principal + "}\n"
+	}
+	writeConfig(t, u, source("laptop-client"))
+	u.mustRun("", "init")
+	u.mustRun(ownerPassphrase+"\n", "identity", "setup", "--username", "owner")
+	id := strings.TrimSpace(u.mustRunStdout("", "identity", "key", "create", "--name", "reporter", "--scope", "usage-monitor.ingest", "--out", filepath.Join(t.TempDir(), "r.key")))
+	out, err := u.run("", "validate")
+	if err == nil || !strings.Contains(out, `push source "laptop"`) || !strings.Contains(out, "laptop-client") || strings.Contains(out, id) {
+		t.Fatalf("validate with the old client name: %v\n%s", err, out)
+	}
+	writeConfig(t, u, source("key:"+id))
+	if out := u.mustRun("", "validate"); !strings.Contains(out, "OK") || !strings.Contains(out, "1 live key(s)") {
+		t.Fatalf("validate with the key's principal: %s", out)
 	}
 }
 

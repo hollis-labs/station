@@ -29,7 +29,8 @@ disclosure; response times are best effort during the pre-release period.
 Station is three binaries (the MCP host, the LLM gateway, the usage monitor). Each is its own identity provider and runs with
 authentication enforced.
 
-- Every route except `/healthz` needs an identity API key whose scopes cover the route; a route no scope maps is refused. There are
+- Every route except `/healthz` needs an identity API key whose scopes cover the route; a route no scope maps is refused. The one
+  exception is `GET /api/setup`, which answers `{"setup_required":false}` to anyone (the first check after a start); it reveals nothing else. There are
   no shared bearer tokens and no unauthenticated mounts.
 - Each unit refuses to listen on anything but a loopback address. A local TLS proxy's public name is served only when it is listed in
   the unit's `allowed_hosts`, the peer is loopback and the request carries exactly one `X-Forwarded-Proto: https`; other forwarding
@@ -42,7 +43,9 @@ authentication enforced.
 ## Data at rest
 
 Each unit keeps one data directory (database, signing key, secrets state), private to the user (mode 0600/0700). The gateway
-stores revisions that hold secret *references* (never values) and key hashes; the usage monitor stores observations. The
+stores revisions that hold secret *references* for credentials, but literal provider header values (`headers` in a provider block) are stored
+as written (`gateway-store show` redacts them in its output, the database does not), and with `ledger.capture.mode: full` the ledger keeps
+sanitised request and response bodies; it also holds key hashes; the usage monitor stores observations. The
 gateway ledger is SQLite in that database or PostgreSQL with separate runtime and migration logins.
 
 Credentials are references (`keychain://...`, `file://...`) resolved when needed and registered with the log redactor. Do not
@@ -51,7 +54,8 @@ commit values or paste them into arguments; `<unit> secret set` reads stdin.
 ## External data processors
 
 Station makes no outbound calls beyond the upstreams you configure: the LLM providers a gateway revision names, the provider usage
-endpoints the usage monitor's collectors call, and the MCP servers' own dependencies. Data sent there is governed by those services.
+endpoints the usage monitor's collectors call, the MCP servers' own dependencies, and the gateway's model catalog, which it fetches
+from models.dev by default (`catalog.refresh: false` stops the background fetches; `catalog.url` points it elsewhere). Data sent there is governed by those services.
 
 ## Current security limitations
 
