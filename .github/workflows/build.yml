@@ -13,7 +13,7 @@ jobs:
     uses: hollis-labs/tools/.github/workflows/go-app-build.yml@145fb50d827a1af7e38236eda5751cee22970ba5   # tools main (extra_files, pre_test_cmd)
     with:
       app: station
-      main_pkg: ./cmd/station-next
+      main_pkg: ./cmd/station
       binary: station
       ui_cmd: 'cp deploy/station.yaml deploy.yaml'
       test_cmd: 'test -z "$(gofmt -l .)" && go mod tidy -diff && go build ./... && go vet ./... && go test -race -count=1 -timeout 4m ./...'

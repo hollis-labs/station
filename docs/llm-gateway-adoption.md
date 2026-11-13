@@ -32,53 +32,25 @@ without a key, and a JSON model list with an authorized key.
 
 ## Provision one identity per app or evaluation launch
 
-An operator on the gateway host issues the credential. Adopting agents should request
-one for their app, not copy the operator or smoke-test credential.
+The gateway is its own identity provider. An operator on the gateway host issues each app its own **API key**
+(`key_...`), carrying only the scopes it needs. Adopting agents request one for their app and do not copy the operator or
+smoke-test key. Keys take effect immediately: there is no gateway revision, activation or reload for a credential change.
 
 ```bash
-STATION=$HOME/.cerberus/apps/station/station-llm-gateway/bin/station-llm-gateway
-DB=$HOME/.local/state/station/gateway/gateway.db
-API_CONFIG=$HOME/.config/station/gateway/api.yaml
+# An explicit environment, so the command reads the unit's own configuration and data directory.
+export SUBSTRATE_CONFIG=$HOME/.config/station/gateway/substrate.yaml
+export LLM_GATEWAY_DATA_DIR=$HOME/.local/share/llm-gateway
 
-"$STATION" gateway-store status -db "$DB"
-"$STATION" client list -gateway-db "$DB"
+llm-gateway identity key create --name my-app-eval \
+  --scope llm-gateway.chat --scope llm-gateway.models.read \
+  --out $HOME/.config/station/gateway/tokens/my-app-eval.key
 ```
 
-Read `latest_revision` and `active_revision` from status. Replace the uppercase
-revision placeholders below with those numbers. If they differ, review the
-pending changes before proceeding: issuance builds on the latest document, and
-activation applies its configuration as well as its credentials.
-
-```bash
-"$STATION" client issue -gateway-db "$DB" \
-  -expected LATEST_REVISION -actor operator -id my-app-eval \
-  -output $HOME/.config/station/gateway/tokens/my-app-eval.token \
-  -scopes llm-gateway.chat,llm-gateway.models.read
-```
-
-Issuance prints the new staged revision ID. Use that exact ID as
-`ISSUED_REVISION`, and the previously observed `active_revision` as
-`SELECTED_REVISION`. Do not substitute a newer concurrent edit. Stop on any error.
-
-```bash
-"$STATION" gateway-store activate -db "$DB" \
-  -revision ISSUED_REVISION -expected SELECTED_REVISION -actor operator
-"$STATION" validate -api-only -api-config "$API_CONFIG" -gateway-db "$DB"
-# Continue only if validation succeeds.
-cerberus resource status station-llm-gateway
-cerberus resource reload station-llm-gateway --ack
-```
-
-If validation fails, select the previous working revision before any reload.
-After reload, a management operator must verify that `/management/status` has
-the intended `running_revision` and `selected_revision`, with
-`restart_required: false`. Selection alone does not apply a credential change.
-
-The output file is created exclusively with mode 0600. SQLite contains
-SHA-256 client hashes, never raw tokens. Issue refuses an existing identity or output
-file. Store/distribute the token through the adopting application's approved
-secret mechanism; do not paste it into task descriptions, logs, committed
-config, URLs, or command arguments. The `tokens` directory is owner-only.
+The key is written once to a new file with mode 0600 (`--stdout` writes it to stdout and nothing else); the database holds only a
+hash. Store and distribute the key through the adopting application's approved secret mechanism; do not paste it into task
+descriptions, logs, committed config, URLs or command arguments. A signed-in administrator can also issue, list and revoke keys
+over the API (`POST /api/identity/keys`, `GET /api/identity/keys`, `DELETE /api/identity/keys/<id>`); a key can grant only scopes its
+creator holds.
 
 Scopes:
 
@@ -94,33 +66,17 @@ Scopes:
 | `llm-gateway.management.*` | All management permissions; credential grants also require the scopes being granted |
 | `llm-gateway.*` | All gateway permissions, including management; reserve for trusted administrators |
 
-The host's `station-operator` credential holds explicit inference, model,
-catalog and usage permissions. `station-management` holds management scopes
-and the explicit scopes it may grant to app credentials. Neither is an app key.
+Keys the host runs with: an operator key (explicit inference, model, catalog and usage scopes), a management key (management scopes and the
+explicit scopes it may grant), a smoke-test key and the usage monitor's collector key (`llm-gateway.usage.read` only). None of them is
+an app key.
 
-Revocation stages another revision. Re-read status and inspect pending changes
-before supplying the latest revision:
-
-```bash
-"$STATION" client revoke -gateway-db "$DB" \
-  -expected LATEST_REVISION -actor operator -id my-app-eval
-```
-
-Apply the printed revision with the same select, validate, reload and status
-checks used for issuance. The management API also supports issuance, scope edits,
-rotation and revocation with revision preconditions. Its rotation response
-returns the new token once; save it privately before applying the revision.
-No overlapping-key rotation or token-expiry service is configured.
-
-Existing in-flight work can finish during graceful shutdown. Editing the old
-`clients.yaml` has no effect while `-gateway-db` is selected. Operator credentials
-can read all usage; ordinary app credentials cannot. The existing JWT support is
-not configured for this local deployment.
+Revoke a key with `DELETE /api/identity/keys/<id>` (administrator) or by an offline `identity` command run against the stopped unit. In-flight
+work can finish during graceful shutdown. Operator keys can read all usage; ordinary app keys cannot. Tether-issued JWTs are not accepted.
 
 ## Identity and conversations
 
 Send `Authorization: Bearer <app-token>`. Anthropic clients may instead send
-`x-api-key: <app-token>`; this is a Station client token, not a vendor token.
+`x-api-key: <app-token>`; this is a Station API key, not a vendor key.
 Station resolves provider credentials itself and replaces upstream auth.
 
 For every conversation or agent run, generate an opaque ID and send it as
@@ -243,15 +199,14 @@ and tool semantics survive your app's own SDK and launch configuration.
 ## Operations and durable state
 
 - Cerberus resource: `station-llm-gateway`, artifact-backed systemd user service,
-  enabled at boot with automatic restart; it runs `serve -api-only`.
+  enabled at boot with automatic restart; it runs `llm-gateway serve` (installer descriptor `deploy/llm-gateway.yaml`).
 - Dedicated PostgreSQL resource: `station-gateway-ledger`, Docker Compose,
   loopback `127.0.0.1:15438`, persistent named volume, restart unless stopped.
-- Bootstrap configuration: `~/.config/station/gateway/api.yaml`.
-- Gateway configuration and client hashes: selected revision in
-  `~/.local/state/station/gateway/gateway.db` (0600, owner-only parent directory).
-- Resource descriptor: `~/.config/station/gateway/station.cerberus.yaml`.
-- The old `~/.config/station/gateway/clients.yaml` is retained for rollback;
-  edits do not affect the managed service.
+- Unit configuration: the `SUBSTRATE_CONFIG` override file (`~/.config/station/gateway/substrate.yaml`: listen address, proxy names).
+- Gateway configuration: the active revision in `llm-gateway.db` in the unit's data directory (`~/.local/share/llm-gateway`, 0600,
+  owner-only parent directory); API keys and the signing key are in the same directory.
+- The previous build's files (`~/.local/state/station/gateway/gateway.db`, `api.yaml`, `clients.yaml`) are never written by the new
+  build and are kept for rollback until the owner accepts the cutover (`docs/cutover-plan.md`).
 - Provider and ledger credentials: secret references resolved by Station;
   local OS keychain access must remain available to the service.
 - Logs: `~/.cerberus/apps/station/station-llm-gateway/logs/`.
@@ -259,10 +214,8 @@ and tool semantics survive your app's own SDK and launch configuration.
 
 After source changes, use `cerberus resource deploy station-llm-gateway --ack`;
 a bare build does not replace the installed artifact. For managed config/key
-changes, stage and select a revision, validate with the installed binary and
-`-gateway-db`, then reload and verify the running revision. For launch argument
-changes, Cerberus `apply` updates the service definition; `reload` alone does not.
-Validation does not listen,
+changes, stage and activate a revision with `llm-gateway gateway-store`, run `llm-gateway validate`, then restart the unit and
+verify the running revision through the management API. Key changes need no restart. Validation does not listen,
 but it resolves secrets, connects/migrates PostgreSQL, and fetches metadata when
 `catalog.warmup: true`. After restart, wait for health and authenticated model
 listing before sending inference; warmup uses `catalog.refresh_timeout` (default

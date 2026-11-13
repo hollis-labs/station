@@ -1,512 +1,77 @@
 # Station
 
-Station is a prototype built on
-[`github.com/hollis-labs/libs/mcp/plugin-mcp/mcp-host`](https://github.com/hollis-labs/libs/tree/main/mcp/plugin-mcp/mcp-host):
-the generic dual-transport MCP plugin host library. Station itself is thin —
-flag parsing, its own config, and two starter virtual MCPs — proving the
-library is feature-complete enough to build a real product on top of.
+Station is Hollis Labs' MCP host and LLM gateway, built on the
+[Substrate](https://github.com/hollis-labs/substrate) framework. One Go module builds three binaries that run as four units:
 
-> **Pre-release.** Station is pre-1.0 (tagged `0.x`), runs only in Hollis Labs' own
-> fleet, and has no outside consumers. It's being built in the open: the code, the docs, and this
-> README describe what exists today, not a pitch for what's planned.
-> Interfaces and behavior change without notice, and there are no
-> compatibility guarantees yet.
+| Binary | Units | What it does |
+|---|---|---|
+| `station` (`cmd/station`) | avatar-station, design-station | Hosts MCP logical servers (the libs [`mcp-host`](https://github.com/hollis-labs/libs/tree/main/mcp/plugin-mcp/mcp-host) engine) and serves each over HTTP under its own path |
+| `llm-gateway` | llm-gateway | OpenAI- and Anthropic-compatible relay with a ledger, budgets, policy, a catalog and a management API |
+| `usage-monitor` | usage-monitor | Collects provider usage (pull collectors, authenticated push) and serves it |
 
-## Status
+> Station runs in Hollis Labs' own fleet and has no outside consumers. The code and docs describe what exists today; interfaces
+> change without notice.
 
-Built on `plugin-mcp v0.4.0`. Three working virtual MCPs (`echo`, process-mode;
-`clock`, inprocess-mode) run simultaneously, each independently reachable,
-each recovering from a real process kill — see `cmd/station/smoke_test.go`.
+## How a unit works
 
-## Quickstart
+- Every unit is its own identity provider: **identity API keys** (created offline with `<unit> identity key create`) carry scopes,
+  for example `llm-gateway.chat`, `usage-monitor.read`, `station.<server id>`. There are no shared bearer tokens or client-key files.
+- Units listen on loopback only and refuse any other `httphost.addr`. A local TLS proxy's public name is served when it is listed in
+  the unit's `allowed_hosts` and the request comes from a loopback peer with exactly one `X-Forwarded-Proto: https`.
+- State lives in one data directory per unit (`STATION_DATA_DIR`, `LLM_GATEWAY_DATA_DIR`, `USAGE_MONITOR_DATA_DIR`; the default is the
+  XDG data home of the app name). Read-only commands (`validate`, `list`, `--help`, `secret check`) create nothing.
+- Credentials are references (`keychain://ns/key`, `file://...`), never values. `<unit> secret set <ref>` reads the value from stdin;
+  `secret check <ref>` says where it resolves from and how long it is.
+- Configuration is a YAML override file named by `SUBSTRATE_CONFIG` (see `examples/`). The gateway's own configuration (providers,
+  models, ledger, policy) is a revision in its database: `llm-gateway gateway-store stage|activate|show|status|history`.
 
-```bash
-go build -o bin/echo-server ./plugins/echo-server
-go build -o bin/clock-plugin ./plugins/clock-plugin
-go build -o station ./cmd/station
-
-./station validate                    # check station.yaml without running anything
-./station list                        # see what's configured
-./station serve -http-addr :8080      # or just `./station` — serve is the default
-```
-
-This serves `echo` over stdio and `clock` over HTTP at `/clock`
-simultaneously. Point an MCP client at station's stdio for `echo`'s tools,
-or at `http://localhost:8080/clock` for `clock`'s.
-
-## Service layer
-
-Station exposes MCP logical servers and opt-in HTTP plugin APIs. The LLM
-gateway serves API-powered agents and tools directly, with no MCP dependency.
-The CLI is the operator/ops surface:
-
-- `station` / `station serve` — the daemon; bare invocation defaults to
-  this, matching Tangent's "no serve subcommand, bare invocation just
-  serves" pattern.
-- `station validate [-config PATH]` — validate MCP configuration without
-  spawning processes. API validation also assembles plugins and can resolve
-  secrets, fetch metadata, and connect/migrate the ledger. Exit 0/1.
-- `station list [-config PATH]` — print every configured logical server:
-  id, name, transport, and (for `inprocess`) its manifest-declared tool
-  names, without spawning or dialing anything.
-- `station gateway-store` — import, stage, inspect and select SQLite gateway revisions.
-- `station ledger-migrate` — apply PostgreSQL ledger migrations with a separate migration credential, without starting providers or the HTTP service.
-- `station client` — issue/list/revoke hashed credentials in YAML or a gateway database.
-- `station version` — print the build version.
-
-There's no management API and no MCP tools for operating Station
-itself (adding a logical server, restarting one, etc.) — that's
-config-file-driven and CLI-inspected, on purpose, the same way Tangent's
-own plugin install/list/remove stays CLI-only rather than becoming
-agent-callable tools. An agent builds with Station by editing
-`station.yaml` and running `validate`/`list` to check its work, the same
-way an operator would.
-
-## Atlas and other first-party plugins
-
-The Portfolio Atlas server (read-only Atlas tools over Tesseract) moved to
-[`station-plugins`](https://github.com/hollis-labs/station-plugins), the home of
-first-party plugins that are not Station's own starters. Build it there and add
-it to `station.yaml` as a process-mode logical server; its README has the
-config, including the exposure note (Atlas holds `visibility:private` records:
-use loopback or `bearer_tokens`).
-
-## Local HTTP gateway dogfooding
-
-Use `station serve -api-only -api-config /absolute/path/to/api.yaml` to run
-only the HTTP API. No MCP config, demo server, or MCP listener is loaded.
-See [the adoption guide](docs/llm-gateway-adoption.md) for the local endpoint,
-per-app credentials, conversation headers, native API families, and live probes.
-
-## Subscription and API usage monitoring
-
-The opt-in `usage-monitor` HTTP plugin records subscription allowance snapshots
-and token/cost history for other apps to query. It includes Claude, Codex,
-Antigravity and OpenCode Go collectors, paginated gateway history import, and
-principal-bound ingestion for other providers and devices. Account management,
-collection and reads use separate scopes. See the [API and deployment guide](plugins/usage-monitor/README.md)
-and [example configuration](usage-monitor.example.yaml).
-
-## PostgreSQL runtime and migration credentials
-
-For a managed PostgreSQL database, configure public connection metadata and a
-password reference separately. Structured connections require native TLS with
-hostname and public-CA verification; they default to schema verification only:
-
-```yaml
-ledger:
-  store: postgres
-  postgres:
-    host: postgres.example.test
-    port: 5432
-    database: application_ledger
-    user: application_runtime
-    password_ref: file:///private/credentials/runtime-password
-    schema: public
-    schema_mode: verify
-```
-
-The runtime needs schema USAGE, SELECT on `llm_ledger_schema`, and SELECT, INSERT
-and UPDATE on `llm_calls`. It does not need schema CREATE, table ownership or the
-migration credential. Verification uses a read-only transaction, requires the
-complete current migration history and checks the runtime column names. Missing,
-older, newer or incomplete schemas fail startup with migration guidance; verify
-mode never repairs them. This is a compatibility check, not a complete schema
-drift audit.
-
-Run migrations as a separate deployment step using a login allowed to SET ROLE
-the non-login, non-administrative owner. The schema must already exist:
-
-```sh
-station ledger-migrate -host postgres.example.test -port 5432 \
-  -database application_ledger -schema public -user application_migrator \
-  -password-ref file:///private/credentials/migration-password \
-  -owner-role application_owner
-```
-
-The command resolves only this database credential, takes the migration advisory
-lock, creates objects as the owner and exits. Configure owner default privileges
-for future runtime-accessible objects through the database administrator. The
-serving process should receive only the runtime reference. Credential rotation
-updates the login/reference together, followed by restart and authenticated
-read/write verification before the old login is retired.
-
-Existing `dsn_ref` and `dsn_env` configurations retain automatic startup migration
-unless explicitly set to `schema_mode: verify`. Do not mix DSN and structured
-fields. `ledger-migrate -dsn-ref ... -owner-role ...` supports legacy migration
-DSNs, including their existing TLS/search-path settings; the mandatory TLS
-contract applies to structured connections. PostgreSQL provisioning, role/grant
-changes, existing-database adoption and credential rotation belong to the
-infrastructure administrator rather than this command. None of these options
-automatically switches an existing deployment or transfers its ownership.
-
-## SQLite gateway state
-
-The optional SQLite store backs the LLM gateway management API.
-It stores versioned gateway configuration (providers, ordered
-model routes/fallbacks, capabilities/prices, policy rules, budgets and catalog
-settings), hashed client identities/scopes, immutable revision history and an
-activation audit. Usage can share the same database via `ledger.store: sqlite`.
-Provider credentials and PostgreSQL DSNs remain secret references; resolved
-secrets are never imported. The models.dev download cache remains managed by the
-catalog library; per-call price snapshots are retained in the usage ledger.
-
-SQLite uses an application ID and transactional schema version, foreign keys,
-WAL, FULL synchronous writes and a bounded busy timeout. Use an absolute database
-path inside an existing owner-only directory on a local filesystem. Database
-files are created mode 0600; public files and symlinks are refused. Back up a live
-store with SQLite's backup API or `.backup`, not by copying just the main file
-while its WAL is open. A snapshot includes credential hashes and potentially
-captured usage details; keep it private.
-
-Import creates a **staged** revision without contacting providers or resolving
-secrets. For example, with an existing API configuration:
+## Quickstart (throwaway data directory)
 
 ```bash
-install -d -m 700 "$HOME/.local/state/station/gateway"
-DB="$HOME/.local/state/station/gateway/gateway.db"
-station gateway-store import -db "$DB" -api-config /private/api.yaml \
-  -expected 0 -actor operator
-station gateway-store status -db "$DB"
-station gateway-store activate -db "$DB" -revision 1 -expected 0 -actor operator
-station validate -api-only -api-config /private/api.yaml -gateway-db "$DB"
+go build -o bin/ ./cmd/...
+
+export SUBSTRATE_CONFIG=$PWD/examples/usage-monitor.yaml
+export USAGE_MONITOR_DATA_DIR=$(mktemp -d)/usage     # an explicit directory: the default is the live one
+printf '%s\n' "a long passphrase" | bin/usage-monitor identity setup --username owner
+bin/usage-monitor identity key create --name reader --scope usage-monitor.read --out /tmp/reader.key
+bin/usage-monitor validate
+bin/usage-monitor serve
 ```
 
-For a Cerberus-managed service, add `-gateway-db /absolute/path/gateway.db` to its
-serve arguments and deploy/reload through Cerberus. Standalone serve accepts the
-same flag. Startup reads one selected revision and logs its ID. Missing, corrupt,
-incompatible or unactivated databases fail startup; no YAML fallback occurs.
-The API bootstrap file still owns the listener, auth mode/JWT and other plugins,
-and must retain an `llm-gateway` block (it can be `{}`). Its gateway settings and
-client keys/keys_file are replaced by the selected revision. Auth must be enforced.
+`scripts/first-run UNIT` does the same setup non-interactively for a unit (the owner and one 0600 key file per client). Each binary
+has `--help`; `<unit> version` prints the build.
 
-To edit configuration, export a revision into a new private JSON file:
+## Gateway
 
 ```bash
-station gateway-store show -db "$DB" -output /private/gateway-edit.json
-# Edit the document, retaining schema_version: 1.
-station gateway-store stage -db "$DB" -input /private/gateway-edit.json \
-  -expected 1 -actor operator
-station gateway-store activate -db "$DB" -revision 2 -expected 1 -actor operator
-station validate -api-only -api-config /private/api.yaml -gateway-db "$DB"
+export SUBSTRATE_CONFIG=$PWD/examples/llm-gateway.yaml LLM_GATEWAY_DATA_DIR=$(mktemp -d)/gw
+printf '%s' "$KEY" | bin/llm-gateway secret set keychain://openai/work
+bin/llm-gateway gateway-store stage --input examples/gateway.json --expected 0 --actor me
+bin/llm-gateway gateway-store activate --revision 1 --expected 0 --actor me
+bin/llm-gateway validate && bin/llm-gateway serve
 ```
 
-`-expected` is the **latest** revision for import/stage/client edits and the
-**active** revision for activation. A stale value is rejected, including across
-processes. `history` lists revision metadata (`-before ID` paginates); `show
--revision ID` exports a particular document. Unknown JSON fields, unsupported
-document versions, invalid references/rules/budgets and ambiguous client hashes
-are rejected before a revision is stored. The document is typed JSON, with
-snake_case fields matching the YAML configuration.
+Relay routes are under `/api/llm-gateway/v1/` (clients keep their base URL); the management API is under
+`/api/llm-gateway/v1/management/`. The usage ledger is SQLite in the service database, or PostgreSQL with separate runtime and
+migration logins (`llm-gateway ledger-migrate`; `docs/conversion-notes.md` has the role layout and the proof).
 
-Activation selects the revision for the **next startup**; it does not hot-reload
-the running gateway or prove credentials/upstreams work. Validate before reloading
-and run the existing gateway smoke probes afterward. To roll back, activate a
-previous revision with the current active ID as `-expected`, then validate/reload.
-Rollback restores client credentials too: an old revision can re-enable a
-revoked key. Usage records are independent of configuration rollback.
+## Documents
 
-Providers and model aliases accept `enabled: false` (default true). Disabled
-providers skip secret resolution/discovery and are removed from runtime targets;
-disabled aliases and aliases with no enabled targets are absent from model lists
-and cannot be invoked. Their definitions remain in the stored document for later
-re-enablement. Fallback and policy order survive storage unchanged.
+- `docs/architecture.md`: layout, scopes, the bind rule, the gateway and usage services.
+- `docs/conversion-notes.md`: the port from the previous build: gaps, old-to-new map, rehearsals and proofs.
+- `docs/cutover-plan.md`: the live move, step by step, with rollback.
+- `docs/llm-gateway-adoption.md`, `docs/llm-gateway-management.md`, `docs/llm-gateway-standards.md`: using and operating the gateway.
+- `SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`.
 
-Client operations also stage revisions, preserving other pending configuration:
+## Development
 
 ```bash
-station client issue -gateway-db "$DB" -expected 2 -actor operator \
-  -id my-app -output /private/my-app.token \
-  -scopes llm-gateway.chat,llm-gateway.models.read
-station client list -gateway-db "$DB"
-station client revoke -gateway-db "$DB" -expected 3 -actor operator -id my-app
+go vet ./... && go test -race -count=1 ./...
+go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run ./...
+go run github.com/hollis-labs/substrate/cmd/substrate pins check --app .
 ```
 
-Use the returned revision ID for activation, then validate/reload. The list is
-from the latest revision and reports both latest and active IDs. Token material
-is only written to a new 0600 file, never stdout; SQLite retains SHA-256 hashes.
-Changes to the old YAML registry have no effect when `-gateway-db` is selected.
-
-For usage in the same SQLite file, select this ledger configuration in the
-stored document (or under the YAML plugin when not using managed configuration):
-
-```yaml
-ledger:
-  store: sqlite
-  sqlite:
-    path: /absolute/private/gateway.db
-  capture:
-    mode: off
-```
-
-Remove `ledger.postgres` settings when selecting SQLite. Existing PostgreSQL
-history is **not migrated automatically**; changing the backend starts reading
-that backend's records, affecting usage reports and budget counters. Preserve
-and migrate historical entries before a live cutover. SQLite uses the same
-bounded asynchronous usage writer as PostgreSQL: committed batches are atomic
-and idempotent, but queued records can still be lost on crash/overflow.
-
-Starting with `-gateway-db` also enables the [management API](docs/llm-gateway-management.md)
-under `/api/llm-gateway/v1/management`. It uses the portfolio
-`Authorization: Bearer` pattern and dedicated management scopes through the
-shared auth library. Operators can stage configuration and credential changes,
-validate them, inspect history, and select a revision for the next service reload.
-Status distinguishes latest, selected and actually running revisions; selection
-does not hot-reload the gateway. Existing chat credentials should receive only
-inference/model-read scopes. YAML-only deployments do not expose management routes.
-
-## Plugin platform and the LLM gateway
-
-Station's core hosts MCP logical servers and, when asked, one HTTP API
-assembled with `app-host` (`platform/`). Product features are plugins that
-register through a small hook set: `Mount` (routes under `/api/<plugin>/`, each
-with a required auth scope), `UseMiddleware` (ordered by phase, with a declared
-failure mode), `AddTransport` (extra listeners) and `OnStop`. A plugin runs only
-when its block exists in the API config. See `api.example.yaml`.
-
-`plugins/llm-gateway` is a transparent relay, not an envelope gateway
-(CW-20261013-0030). A request arriving on a provider-native endpoint goes to an
-upstream speaking the same protocol and the bytes pass through; the gateway only
-swaps in the hub-held credential, rewrites the `model` field (and, for OpenAI
-streams, asks the upstream for usage and hides that chunk again unless the
-client asked), and reads usage from the response. Endpoints, under
-`/api/llm-gateway`:
-
-- `POST /v1/chat/completions` and `POST /v1/responses` (OpenAI), base URL `.../api/llm-gateway/v1`
-- `POST /v1/messages` (Anthropic), base URL `.../api/llm-gateway`, key via `x-api-key`
-- `POST /v1/embeddings` (OpenAI), for models with `kind: embedding`
-- `POST /v1/systemone` (JEV), for models with `kind: decision`. A decision model is an LLM like the others (provider, target, policy, guard, ledger); only its dialect differs. Question order is preserved byte for byte, and the answers are kept in the ledger
-- `GET /v1/models` (shape follows the `anthropic-version` header; decision models are not listed; includes resolved capabilities, pricing, context/output limits, modalities, and model metadata)
-- `POST /v1/catalog/prices/reload`: reload the configured local price table with last-good preservation, using `llm-gateway.catalog.write`
-- `GET /v1/catalog?provider=&model=&family=` and `POST /v1/catalog/refresh`: centralized model catalog (`llm/core/modelsdev` + `llm/core/pricesource`) cached on disk and refreshed in the background with a default `90s` TTL (`catalog.ttl` in `api.yaml`)
-- `GET /v1/usage?limit=&principal=&since=`
-
-See the [standards and model-intelligence contract](docs/llm-gateway-standards.md)
-for provider API direction, catalog freshness, identity/price precedence, and
-the tracked capability/budget/MCP gaps. Catalog reads report `schema_version: 1`
-and `status` (`empty`, `fresh`, `stale`), with `status.sync` worker/retry health
-and `status.price_file` reload health; model targets report `catalog_matched`
-and their resolved `catalog_provider`. A wire dialect does not establish a
-provider's prices or capabilities. Custom provider IDs should set an explicit
-`catalog_provider`; an explicit mapping never falls back to another provider.
-
-Pattern: a `Dialect` adapter per wire protocol, `provider` + `target` with
-`ProviderCapabilities` resolved from `models.dev` and operator overrides (a request
-needing tools or vision skips targets lacking it), automatic `pricesource` price
-resolution (`target.price` override -> `catalog.price_file` -> `models.dev`), optional per-target `translate: true` for explicit `openai` <-> `anthropic`
-chat and streaming SSE translation (same-dialect requests remain a zero-translation
-byte relay), an `llm.invoke` decision through `security/policy` (shadow by default,
-ask refuses until approved), and `llm/core` guard for breaker and cooldown with
-failover before the first byte. Caller identity comes only from the verified
-principal; a `caller_id` in a request is ignored. Auth is `security/auth`: Tether-issued EdDSA JWTs verified offline against a
-cached JWKS (`auth.jwt`), plus static hashed keys. Provider keys are secret
-references, not config: `printf %s "$KEY" | station secret set keychain://openai/work`,
-then `api_key_ref: keychain://openai/work` (`station secret check <ref>` shows
-where it resolves, never the value).
-
-Logging: JSON to stderr through `security/redact` (known secrets are matched
-exactly, credential shapes by rule). One `http` line per request (verified
-principal, route pattern, status, duration, request ID; no query string, header
-or body), one `auth` event per guarded request, one `policy` event per
-`llm.invoke` decision, one `llm.call` line per relayed call (provider, model,
-outcome, tokens, cost) and `llm.refused` for what the gateway turns away.
-Prompts and completions are never written to stderr logs. Flags: `-log-format`, `-log-level`.
-
-Ledger: every call (and every failed-over attempt) is an entry with identity,
-routing, outcome, disjoint usage, price snapshot and cost. `ledger.store: sqlite`
-uses the gateway SQLite database described above. `ledger.store: postgres`
-makes it durable: an idempotent, migrated `llm_calls` table in a database and role
-dedicated to it, written off the request path through a bounded queue with retry. If
-the database is down, calls still succeed, entries wait and retry, and a dropped
-entry is counted (`buffer.dropped` in `/v1/usage`) and logged with enough to recover
-it. Setting `ledger.capture.mode: full` passes the leader/system prompt, tool
-definitions, request body and response (or bounded SSE events) through
-`security/redact` `v0.2.0` `Sanitizer` (sharing the resolved-secret `redact.Scope`
-and PII rules, failing closed to an `oversized` tombstone when a payload exceeds
-`ledger.capture.max_bytes`) and stores them in `detail` alongside the redaction
-audit report.
-
-Budgets use `llm/core/quota` window and limit math over `day`, `week`, `month`
-or rolling windows, scoped by `total` or verified `principal` (`max_usd` and/or
-`max_requests`). Admission reads the complete retained ledger window and commits
-an `outcome: reserved` row before dispatch. PostgreSQL serializes check-and-insert
-with a transaction advisory lock; SQLite uses an immediate transaction. All
-matching budgets must admit before any row is written. The lock is released before
-contacting the provider. All workers sharing a ledger must use this reservation
-path and consistent budget configuration for cross-process request limits.
-
-Configured budgets enforce independently of policy mode and ordered allow rules.
-Exhaustion returns `429 budget_exceeded` with `Retry-After` when known. Store
-failures return `503 budget_unavailable`. Unresolved, missing or partial cost in
-a matching spend window returns `503 budget_cost_unknown`; a known zero cost
-remains free. A `free` tag cannot bypass a budget; use budget model filters to
-exclude a separate local alias when appropriate. Every fallback needs its own
-reservation and consumes another request slot.
-
-A matching spend budget also requires usable base token rates before dispatch:
-input for embeddings; input and output for chat, Responses and decisions.
-Absent snapshots, unknown required rates, and invalid rates return
-`503 budget_price_unknown` without writing a reservation or contacting the
-provider. This applies to each selected target, including fallbacks; it does not
-automatically select a different target on a pricing refusal. Known zero rates
-remain valid. Request-only budgets and calls outside the spend budget's filters
-do not require prices. Fix the configured override or refresh/reload the relevant
-price source before retrying; this error has no time-based `Retry-After`.
-
-This checks the same captured snapshot that settlement uses. Missing optional
-cache/reasoning rates can still make actual usage partially priced and block
-subsequent spend through `budget_cost_unknown`. The legacy inline `price` object
-treats zero input/output as known free rates and zero optional rates as unknown;
-use `catalog.price_file` when omitted and explicitly zero components must be
-distinguished. Catalog tiered pricing without a resolved flat rate fails this
-base-rate check. A known base rate does not certify freshness, account-specific
-billing, feature charges, or complete pricing for the request.
-
-Completion atomically replaces the reservation with its usage and outcome,
-including failures and cancellations. ID, admission time, identity and captured
-price stay fixed. Identical settlement retries are safe; conflicting retries are
-refused. Budgeted writes bypass the asynchronous usage queue. A crash, ambiguous
-commit or settlement failure leaves the reservation counted until settlement or
-window expiry; it is never assumed free. The retained row remains visible in
-`/v1/usage` even after its window expires. `recorded_at` for reserved attempts is
-admission time, so a long call settles into the window in which it started.
-
-Request limits cover in-flight attempts across processes and restarts with SQL
-storage. Spend limits block overlapping attempts while cost is unresolved.
-By default, `max_usd` checks observed spend and does **not** bound a single
-attempt's dollar cost. Set `require_cost_bound: true` on a spend budget to require
-the entire attempt to fit before dispatch. Unsupported shapes or missing target
-contracts return `422 budget_cost_unbounded`; a supported bound that does not fit
-returns `429 budget_exceeded`. Existing configurations retain their default behavior.
-
-The first bounded method is `tokenized_embeddings_v1`, declared explicitly with
-`cost_bound_method` on a native OpenAI-dialect embedding target. This is an
-operator assertion that the endpoint charges only a flat input-token rate for
-the supplied token-ID arrays, using the resolved price snapshot. Verify this
-against the provider/account contract; protocol compatibility alone is insufficient.
-It accepts one nonempty array of nonnegative integer token IDs or a batch of such
-arrays. Only `model`, `input`, `dimensions`, `encoding_format`, and `user` are
-accepted. Plain text, other operations, additional fields, and beta headers are
-unbounded and refused in strict mode. No tokenizer or model-limit guesses are used.
-
-For example, after configuring an appropriate provider and current input price:
-
-```yaml
-models:
-  - name: embed-bounded
-    kind: embedding
-    targets:
-      - provider: embedding-provider
-        model: embedding-model
-        cost_bound_method: tokenized_embeddings_v1
-budgets:
-  - id: embedding-spend
-    model: embed-bounded
-    max_usd: 1.00
-    require_cost_bound: true
-```
-
-Strict budgets round their limit down and charges up to microdollars (minimum
-limit `$0.000001`). Admission checks the full bound under the ledger lock, then
-persists it as `cost_bound` with the pending row. This metadata is immutable and
-remains in `/v1/usage` after settlement. Pending or incomplete usage still blocks
-other matching spend, including after restart; a bound is not treated as actual
-usage and does not permit overlapping attempts in this version. Embedding usage
-must report matching `prompt_tokens` and `total_tokens` equal to the admitted
-input count, with no additional usage fields. A mismatch marks cost partial,
-logs `budget.bound_usage_mismatch`, and blocks further spend in that window.
-
-These are bounds at the captured configured rates, not guarantees about a
-provider invoice. General chat/tool/multimodal bounds, complete feature pricing,
-and reconciliation remain CW-20261017-0021. Usage summary totals still aggregate
-successful calls; budget counters also include outstanding and other outcomes.
-PostgreSQL ledger schema v3 adds nullable `cost_bound` metadata while preserving
-existing rows. Earlier binaries refuse that newer schema; deployment rollback
-requires a compatible binary or a restored pre-upgrade database.
-
-Memory storage is only for one process and loses state on restart. With budgets
-it refuses admission when history capacity is full instead of evicting accounting
-records; use SQLite or PostgreSQL for shared use. Keep all ledger rows for at least
-the longest configured budget window. Do not delete unresolved rows to unblock
-spend without independently establishing the actual usage. No operator settlement
-API or provider-billing recovery job is included yet. Deployments with no budgets
-retain asynchronous usage recording and its existing loss/overflow limits.
-
-Targets carry `tags` (`local`, `free`, `paid`) and `best_effort: true`
-(`CW-20261011-0099`: fast 1.5s header timeout + threshold-1 breaker so a sleeping or
-rebooting tailnet llama host fails over in milliseconds and is skipped while open),
-and `GET /v1/models` exposes `kind`, `reachable`, `tags` and per-target breaker state.
-
-Not yet: gemini native dialect. Tether remains the production gateway while Station's
-gateway is validated in shadow/parallel.
-
-```bash
-OPENAI_API_KEY=... ANTHROPIC_API_KEY=... station serve -config station.yaml -api-config api.yaml
-station validate -config station.yaml -api-config api.yaml
-```
-
-## Depending on mcp-host
-
-Station depends on the real, published
-[`github.com/hollis-labs/libs/mcp/plugin-mcp/mcp-host`](https://github.com/hollis-labs/libs/tree/main/mcp/plugin-mcp/mcp-host)
-(`mcp/plugin-mcp` `v0.4.0` as of this writing) — no `replace` directive needed. Both repos
-are also listed in `~/dev/hollis-labs/go.work` for convenience when
-developing them together locally; that workspace entry overrides
-resolution to the local checkout, but `go.mod`'s own `require` line is a
-real version, so a build outside this workspace (`GOWORK=off`, or any
-other machine) fetches it from GitHub like any other dependency.
-
-## Config
-
-Station's own `station.yaml` configures its two starter virtual MCPs and the
-GitHub pilot. See
-[mcp-host's README](https://github.com/hollis-labs/libs/tree/main/mcp/plugin-mcp/mcp-host#config) for the
-full config schema, the process/inprocess transport split, and how to add a
-new logical server — Station's config is just an instance of that schema,
-nothing Station-specific about the format itself.
-
-## Package map
-
-- `cmd/station/main.go` — the whole binary: subcommand dispatch
-  (`serve`/`validate`/`list`/`version`), flag parsing, config loading, then
-  a single call into `mcphost.Run` for `serve`. Everything host-shaped
-  lives in the library.
-- `platform/` — plugin platform: hook registry, stock middleware, auth wiring, app-host assembly.
-- `plugins/llm-gateway` — the llm-gateway plugin (imports libs and `platform` only).
-- `plugins/echo-server` — process-mode starter virtual MCP: a real,
-  standalone MCP server with one `echo` tool.
-- `plugins/clock-plugin` — inprocess-mode starter virtual MCP: a
-  plugin-sdk-dialect subprocess with one `now` tool.
-- `cmd/station/main_test.go` — builds the real binary and drives it with a
-  real MCP client over real stdio.
-- `cmd/station/smoke_test.go` — the two-virtual-MCPs acceptance test:
-  both plugins running simultaneously under one station process, each
-  independently reachable, each killed and confirmed to recover.
-
-The two starter plugins remain demonstrations; the Atlas server is the first
-real capability. Adding another follows the same wiring.
-
-## Commands
-
-```bash
-gofmt -l .
-go vet ./...
-go test -race -count=1 ./...
-```
-
-No CI, no Makefile — these three are the only gate. `go test ./...` builds
-real binaries and spawns/kills real processes, so expect it to take several
-seconds — that's the point, not a flake.
-
-## Known gaps
-
-Everything in [mcp-host's README](https://github.com/hollis-labs/libs/tree/main/mcp/plugin-mcp/mcp-host#known-gaps-and-boundaries)
-"Known gaps and boundaries" applies here too — Station doesn't work around
-any of them, it just consumes the library as-is. Station-specific: the two
-starter plugins are demonstration tools. The Atlas server is read-only: its
-write tools need Tesseract to refuse a duplicate key and a stale `supersedes`
-first (it accepts both silently today), and Station is not deployed, so no
-agent reaches `/atlas` yet.
+See `AGENTS.md` for the rules that are easy to break (explicit data directories in tests, the single write connection, the raw relay prefix).
 
 ## License
 

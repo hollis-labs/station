@@ -127,7 +127,7 @@ Layout (module `github.com/hollis-labs/station`, one Go module, three binaries):
 
 | Path | What |
 |---|---|
-| `cmd/station-next` (becomes `cmd/station`) | MCP host: avatar-station and design-station are two units of this binary |
+| `cmd/station` (was `cmd/station-next`) | MCP host: avatar-station and design-station are two units of this binary |
 | `cmd/llm-gateway` | the LLM gateway service (section 11) |
 | `cmd/usage-monitor` | usage monitor (not written yet) |
 | `internal/appboot`, `internal/appdirs`, `internal/appcmd` | shared boot hook and command plan, per-app data directory, shared `secret` command |

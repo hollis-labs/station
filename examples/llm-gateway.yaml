@@ -1,0 +1,9 @@
+# Override file for llm-gateway: point SUBSTRATE_CONFIG at a private copy of this file.
+# The gateway's own configuration (providers, models, ledger, policy) is not here: it is a revision in the service
+# database, staged and activated with `llm-gateway gateway-store stage|activate` (see examples/gateway.json).
+httphost:
+  addr: "127.0.0.1:18082"
+identity:
+  trusted_proxy: true      # only when a local TLS proxy forwards the public name
+llm-gateway:
+  allowed_hosts: [gateway.example.test]

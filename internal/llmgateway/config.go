@@ -1,14 +1,11 @@
-// Package llmgateway is Station's LLM gateway plugin ("llm-gateway").
+// Package llmgateway is Station's LLM gateway ("llm-gateway"), served by cmd/llm-gateway.
 //
 // It exposes an OpenAI-compatible HTTP API (chat completions and a model
 // list) in front of one or more upstream providers, and adds what a direct
 // provider call lacks: model aliases with ordered fallback, a circuit breaker
-// and cooldown per upstream (llm/core guard), per-call usage and cost records
-// (llm/core usageledger and costcalc), and Station's shared authentication.
-//
-// The plugin imports only libs and the platform hook package, never Station
-// internals, so it can move to its own repository unchanged. Tether remains
-// the production gateway while this is built; the routes here are additive.
+// and cooldown per upstream (llm/core guard), and per-call usage and cost
+// records (llm/core usageledger and costcalc). Callers authenticate with
+// Substrate identity API keys.
 package llmgateway
 
 import (
