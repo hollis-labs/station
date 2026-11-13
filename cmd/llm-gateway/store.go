@@ -223,12 +223,12 @@ func (g *gateway) ledgerMigrateCmd() *cobra.Command {
 		Short: "Apply the Postgres ledger schema as the migration login (SET ROLE to the owner)",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
+			if owner == "" {
+				return errors.New("ledger-migrate requires --owner-role and a migration connection")
+			}
 			res := secrets.Resolver(g.app)
 			if res == nil {
 				return errors.New("the secrets module must be started")
-			}
-			if owner == "" {
-				return errors.New("ledger-migrate requires --owner-role and a migration connection")
 			}
 			ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
 			defer cancel()

@@ -3,7 +3,13 @@ package llmgateway
 import (
 	"fmt"
 	"path"
+	"slices"
 )
+
+// otherPrincipals are shapes of principal that exist besides issued keys: a signed-in user is
+// `user:<id>`. A pattern that matches one of them (`*`, `user:*`) can match a real caller, so it is
+// not reported; `key:<id>` patterns are checked against the live keys.
+var otherPrincipals = []string{"user:probe"}
 
 // UnmatchedPrincipals returns, for every policy rule and budget of cfg that names a principal, a line
 // when none of the given principal ids (the `key:<id>` of each issued, live key) matches its glob.
@@ -17,7 +23,7 @@ func UnmatchedPrincipals(cfg Config, principals []string) []string {
 		if pattern == "" {
 			return
 		}
-		for _, p := range principals {
+		for _, p := range append(slices.Clone(principals), otherPrincipals...) {
 			if ok, err := path.Match(pattern, p); err == nil && ok {
 				return
 			}

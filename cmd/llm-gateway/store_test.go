@@ -127,8 +127,8 @@ func TestMigrateFromOldGatewayDatabase(t *testing.T) {
 	}
 }
 
-// The plan runs the identity sitting before the window, so the new database holds the owner when
-// `migrate-from` runs. The migration must work on it, and a key made afterwards must still work.
+// `migrate-from` also works on a database that already holds the owner (identity setup run first), and a
+// key made afterwards still works. The plan's order is migrate first; this keeps the other order safe.
 func TestMigrateFromAfterIdentitySetup(t *testing.T) {
 	u := newUnit(t, "")
 	u.mustRun(ownerPassphrase+"\n", "identity", "setup", "--username", "owner")
@@ -175,6 +175,15 @@ func TestValidateRefusesAPrincipalNoKeyCanProduce(t *testing.T) {
 	u.mustRun("", "gateway-store", "activate", "--revision", "2", "--expected", "1", "--actor", "test")
 	if out := u.mustRunStdout("", "validate"); !strings.Contains(out, "OK, revision 2") || !strings.Contains(out, "1 live key(s)") {
 		t.Fatalf("validate after the rewrite: %s", out)
+	}
+}
+
+// `ledger-migrate` without --owner-role says so (it needs no Postgres to say it); TestLedgerMigrateCommand
+// repeats this after a real migration but only runs where Postgres is available.
+func TestLedgerMigrateNamesTheMissingOwnerRole(t *testing.T) {
+	u := newUnit(t, "")
+	if out, err := u.run("", "ledger-migrate", "--dsn-ref", "file://ledger/migration"); err == nil || !strings.Contains(out, "--owner-role") {
+		t.Fatalf("ledger-migrate without --owner-role: %v\n%s", err, out)
 	}
 }
 

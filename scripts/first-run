@@ -3,6 +3,9 @@
 #
 #   scripts/first-run UNIT
 #
+# This is for a NEW unit. For the usage monitor it also runs `init` (no history to bring over), so
+# do not use it to move an existing unit: that is `migrate-from` first (docs/cutover-plan.md).
+#
 # UNIT is avatar-station, design-station, llm-gateway or usage-monitor. It creates the unit's owner
 # and the API keys its clients need, with the unit binary's own `identity setup` and
 # `identity key create` commands, which run through the normal boot and so place the database, the
@@ -95,7 +98,8 @@ for entry in "${clients[@]}"; do
   echo "first-run: $unit: key for $name written to $file"
   made=$((made + 1))
 done
-echo "first-run: $unit: done (owner $owner, $made new key file(s) of ${#clients[@]})"
 if [ "$unit" = usage-monitor ]; then
-  echo "first-run: usage-monitor: serve refuses this database until it is marked: run 'usage-monitor migrate-from --old-db <copy>' to bring history over, or 'usage-monitor init' for a unit with none"
+  "$FIRST_RUN_BIN" init >/dev/null
+  echo "first-run: usage-monitor: database marked as starting with no history (init)"
 fi
+echo "first-run: $unit: done (owner $owner, $made new key file(s) of ${#clients[@]})"

@@ -2,6 +2,7 @@ package usagemonitor
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -22,10 +23,29 @@ func markInitialised(ctx context.Context, q store.Querier, how string) error {
 }
 
 // Init marks an empty database as the start of a unit with no history to bring over (the explicit
-// alternative to migrate-from). It returns how the database began, which is the earlier mark if there
-// was one.
+// alternative to migrate-from). It refuses a database that already holds rows in any of the history
+// tables and has no mark (marking it would hide how it began). It returns how the database began, which
+// is the earlier mark if there was one.
 func Init(ctx context.Context, st *store.Store) (string, error) {
-	if err := st.WriteTx(ctx, func(ctx context.Context, tx store.Tx) error { return markInitialised(ctx, tx, BeganInit) }); err != nil {
+	err := st.WriteTx(ctx, func(ctx context.Context, tx store.Tx) error {
+		var n int
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM service_state WHERE key='initialised'").Scan(&n); err != nil {
+			return err
+		}
+		if n > 0 {
+			return nil
+		}
+		for _, t := range legacyTables {
+			if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+t.name).Scan(&n); err != nil {
+				return err
+			}
+			if n != 0 {
+				return fmt.Errorf("the database already has rows in %s and no mark: init is for an empty database", t.name)
+			}
+		}
+		return markInitialised(ctx, tx, BeganInit)
+	})
+	if err != nil {
 		return "", err
 	}
 	return began(ctx, st)
@@ -45,7 +65,11 @@ var ErrNotInitialised = errors.New("the usage database has not been initialised"
 // configured accounts, and `migrate-from` then refuses ("already has rows"). The data directory has to
 // be redone from the identity setup.
 func RequireInitialised(ctx context.Context, st *store.Store) error {
-	if _, err := began(ctx, st); err != nil {
+	_, err := began(ctx, st)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("read the initialisation mark: %w", err)
+	}
+	if err != nil {
 		return fmt.Errorf("%w: run `usage-monitor migrate-from --old-db <copy of the old usage.db>` to bring the history over, or `usage-monitor init` to start with none", ErrNotInitialised)
 	}
 	return nil

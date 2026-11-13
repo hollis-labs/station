@@ -34,11 +34,12 @@ export SUBSTRATE_CONFIG=$PWD/examples/usage-monitor.yaml
 export USAGE_MONITOR_DATA_DIR=$(mktemp -d)/usage     # an explicit directory: the default is the live one
 printf '%s\n' "a long passphrase" | bin/usage-monitor identity setup --username owner
 bin/usage-monitor identity key create --name reader --scope usage-monitor.read --out /tmp/reader.key
+bin/usage-monitor init          # a fresh unit with no history; an existing unit uses migrate-from instead, and serve needs one of the two
 bin/usage-monitor validate
 bin/usage-monitor serve
 ```
 
-`scripts/first-run UNIT` does the same setup non-interactively for a unit (the owner and one 0600 key file per client). Each binary
+`scripts/first-run UNIT` does the same setup non-interactively for a new unit (the owner, one 0600 key file per client, and `init` for the usage monitor); it is not the cutover procedure, which migrates first (`docs/cutover-plan.md`). Each binary
 has `--help`; `<unit> version` prints the build.
 
 ## Gateway
