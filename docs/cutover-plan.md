@@ -139,7 +139,10 @@ variable first: the commands that do create resolve the live directory of the ap
    and list every `principal` in `policy.rules` and `budgets`. On the 2026-11-12 copy (revision 10): policy `enforce`, default effect
    `allow`, **no rules and no budgets**, so nothing names a principal and nothing needs rewriting; the ledger block is structured with a
    `file://` password reference and no `dsn_ref`/`dsn_env` (a keychain DSN in the old `api.yaml` is not what the revision applies).
-6. Read section 12 against what is found on the host: every caller gets a key, or is retired. Do the relay-client log pass (section 12)
+6. **The window does not start until every holder of a key is known and ready to swap it.** `nanite` is another application's caller: its owner and
+   Nanite's agent are told it needs a new key at the cutover, and the new key must be handed over (and the old one retired) in the window. Same for any
+   other relay client the log pass finds.
+7. Read section 12 against what is found on the host: every caller gets a key, or is retired. Do the relay-client log pass (section 12)
    now.
 
 ## 6. The window (host-run, in this order, per unit)
@@ -324,8 +327,7 @@ cfg.Auth.KeysFile = ""`). Revision 10 on the rehearsal copy names **five** clien
 | `station-usage-monitor` | `usage.read` | key `usage-collector`, `usage.read` only |
 | `nanite` | `chat`, `models.read` | key `nanite`, the same: a real relay client, found by name |
 
-The driver confirms before the window that the live unit really runs with `-gateway-db` (section 2 says so); if it does not, the keys file's two
-principals are the callers instead and the table above is the revision's dormant list.
+Confirmed by the driver from the live process's command line on 2026-11-12: the gateway unit runs `serve -api-only -api-config <...>/gateway/api.yaml -gateway-db <...>/gateway/gateway.db`, so these five clients are what authenticates live calls; the two-principal keys file is a file the live build ignores.
 
 **Usage scopes after the port.** `GET /v1/usage/export` (what the usage monitor's collector reads) needs `llm-gateway.usage.read` and never
 carries request or response bodies. `GET /v1/usage` shows a `usage.read`-only key its own rows without Detail; every caller's rows with
