@@ -65,3 +65,24 @@ func TestParseRefusesWithTheKeyNamed(t *testing.T) {
 		})
 	}
 }
+
+// Substrate delivers every number as a float64, and YAML writes one of a million or more in exponent form:
+// an unquoted argument or environment value must still reach a process server as the digits written.
+func TestParseKeepsLargeBareNumbersInArgsAndEnv(t *testing.T) {
+	s := server("avatar", "/avatar", map[string]any{"process": map[string]any{
+		"command": "/bin/true",
+		"args":    []any{float64(1048576), "--port", float64(8080)},
+		"env":     map[string]any{"MAX_BYTES": float64(1048576), "WORKERS": float64(4)},
+	}})
+	cfg, err := Parse(block(s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := cfg.MCP.LogicalServers[0].Process
+	if got := strings.Join(p.Args, " "); got != "1048576 --port 8080" {
+		t.Fatalf("args = %q", got)
+	}
+	if p.Env["MAX_BYTES"] != "1048576" || p.Env["WORKERS"] != "4" {
+		t.Fatalf("env = %v", p.Env)
+	}
+}

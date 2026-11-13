@@ -10,6 +10,8 @@ import (
 
 	mcpconfig "github.com/hollis-labs/libs/mcp/plugin-mcp/mcp-host/config"
 	"gopkg.in/yaml.v3"
+
+	"github.com/hollis-labs/station/internal/cfgnum"
 )
 
 // Key is the app's block in the config.
@@ -55,7 +57,7 @@ func Parse(raw any) (*Config, error) {
 			out.AllowedHosts = append(out.AllowedHosts, s)
 		}
 	}
-	b, err := yaml.Marshal(map[string]any{"logical_servers": block["logical_servers"]})
+	b, err := yaml.Marshal(map[string]any{"logical_servers": cfgnum.Integers(block["logical_servers"])})
 	if err != nil {
 		return nil, fmt.Errorf("station.logical_servers: %w", err)
 	}

@@ -10,7 +10,7 @@ require (
 	github.com/hollis-labs/libs/security/policy v0.1.0
 	github.com/hollis-labs/libs/security/redact v0.2.0
 	github.com/hollis-labs/libs/security/secrets v0.1.0
-	github.com/hollis-labs/substrate v0.1.1-0.20261112224431-0f2899ed9fca
+	github.com/hollis-labs/substrate v0.1.1-0.20261113190043-414a929c45c3
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9
