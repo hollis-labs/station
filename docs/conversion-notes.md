@@ -502,9 +502,11 @@ It reads everything from the environment (`FIRST_RUN_BIN`, `SUBSTRATE_CONFIG`, `
 binary reads, so a forgotten one cannot reach the live directory), refuses a loose-mode password file or keys
 directory, and a second run changes nothing (setup refuses when an owner exists).
 `TestFirstRunScript` runs it with the real binary for avatar-station and design-station against throwaway data
-directories and also covers the refusals. The llm-gateway and usage-monitor entries are in the script and get the same
-test when those binaries exist. At cutover the operator runs it once per unit before the unit serves on its live port,
-then hands each key file to its client's owner.
+directories and also covers the refusals; the usage-monitor entry is covered by `TestFirstRunScript` in `cmd/usage-monitor` (setup, keys,
+a second run, a lost key file, and a unit that serves right after). For the usage monitor it also runs `init` (no history to bring over), so
+it is for a NEW unit: **it is not the cutover procedure**. On a cutover host `init` before `migrate-from` would mark the empty database and
+`serve` would no longer be refused; docs/cutover-plan.md section 6 gives the cutover order (migrate-from first, then `identity setup` and the
+keys by hand).
 
 ## Management `/clients` routes: callers and what replaces them
 

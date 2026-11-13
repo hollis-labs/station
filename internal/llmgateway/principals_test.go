@@ -14,6 +14,7 @@ func TestUnmatchedPrincipals(t *testing.T) {
 			{ID: "one-key", Principal: "key:k_abc"},
 			{ID: "star", Principal: "*"},
 			{ID: "users", Principal: "user:*"},
+			{ID: "one-user", Principal: "user:u_123"},
 		}},
 		Budgets: []BudgetConfig{{ID: "ci", Principal: "ci-*"}, {ID: "all"}},
 	}
@@ -23,7 +24,7 @@ func TestUnmatchedPrincipals(t *testing.T) {
 			t.Errorf("missing %s in:\n%s", want, got)
 		}
 	}
-	for _, not := range []string{`"any"`, `"all-keys"`, `"one-key"`, `"all"`, "k_abc"} {
+	for _, not := range []string{`"one-user"`, `"any"`, `"all-keys"`, `"one-key"`, `"all"`, "k_abc"} {
 		if strings.Contains(got, not) {
 			t.Errorf("unexpected %s in:\n%s", not, got)
 		}

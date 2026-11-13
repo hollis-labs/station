@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path"
 	"slices"
+	"strings"
 )
 
 // otherPrincipals are shapes of principal that exist besides issued keys: a signed-in user is
@@ -20,8 +21,8 @@ var otherPrincipals = []string{"user:probe"}
 func UnmatchedPrincipals(cfg Config, principals []string) []string {
 	var out []string
 	check := func(kind, id, pattern string) {
-		if pattern == "" {
-			return
+		if pattern == "" || strings.HasPrefix(pattern, "user:") {
+			return // signed-in users are real callers and are not listed here
 		}
 		for _, p := range append(slices.Clone(principals), otherPrincipals...) {
 			if ok, err := path.Match(pattern, p); err == nil && ok {

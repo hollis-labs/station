@@ -278,13 +278,53 @@ func TestShippedExampleValidatesAndInitRefusesHistory(t *testing.T) {
 	h := newUnit(t, "")
 	writeConfig(t, h, bootstrapAccounts)
 	h.mustRun(ownerPassphrase+"\n", "identity", "setup", "--username", "owner")
-	db := filepath.Join(h.dir, "usage-monitor.db")
-	cmd := exec.Command("sqlite3", db, "INSERT INTO accounts(id,revision,document) VALUES('x',1,'{}')")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Skipf("sqlite3 is not available to seed a row: %v %s", err, out)
-	}
+	seedAccount(t, filepath.Join(h.dir, "usage-monitor.db"))
 	if out, err := h.run("", "init"); err == nil || !strings.Contains(out, "already has rows in accounts") {
 		t.Fatalf("init on a database with history: %v\n%s", err, out)
+	}
+}
+
+// seedAccount adds one history row to an existing service database through the Go driver (no external
+// tool, so a failure fails the test).
+func seedAccount(t *testing.T, path string) {
+	t.Helper()
+	db, err := store.Open(context.Background(), store.Config{Driver: store.DriverSQLite, SQLite: store.SQLiteConfig{Path: path}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.ExecContext(context.Background(), "INSERT INTO accounts(id,revision,document) VALUES('x',1,'{}')"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A first-run on a database that holds history and no mark writes the keys, says so, then fails at init
+// instead of marking it.
+func TestFirstRunRefusesToMarkAUnitWithHistory(t *testing.T) {
+	script, err := filepath.Abs("../../scripts/first-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := newUnit(t, "")
+	u.mustRun(ownerPassphrase+"\n", "identity", "setup", "--username", "owner")
+	seedAccount(t, filepath.Join(u.dir, "usage-monitor.db"))
+	pw := filepath.Join(t.TempDir(), "password")
+	if err := os.WriteFile(pw, []byte("a long test passphrase\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keys := filepath.Join(t.TempDir(), "keys")
+	if err := os.Mkdir(keys, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	c := exec.Command("bash", script, "usage-monitor")
+	c.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + guardRoot, "FIRST_RUN_BIN=" + monitorBin, "SUBSTRATE_CONFIG=" + u.cfg,
+		"FIRST_RUN_DATA_DIR=" + u.dir, "FIRST_RUN_PASSWORD_FILE=" + pw, "FIRST_RUN_KEYS_DIR=" + keys}
+	out, err := c.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "already has rows in accounts") || !strings.Contains(string(out), "init refused") || !strings.Contains(string(out), "done (owner") {
+		t.Fatalf("first-run on a unit with history: %v\n%s", err, out)
+	}
+	if ents, _ := os.ReadDir(keys); len(ents) != 2 {
+		t.Fatalf("the keys were not written before the refusal: %d files", len(ents))
 	}
 }
 

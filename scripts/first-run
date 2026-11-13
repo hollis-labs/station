@@ -98,8 +98,15 @@ for entry in "${clients[@]}"; do
   echo "first-run: $unit: key for $name written to $file"
   made=$((made + 1))
 done
-if [ "$unit" = usage-monitor ]; then
-  "$FIRST_RUN_BIN" init >/dev/null
-  echo "first-run: usage-monitor: database marked as starting with no history (init)"
-fi
 echo "first-run: $unit: done (owner $owner, $made new key file(s) of ${#clients[@]})"
+# The usage monitor also needs its database marked. A no-op on a marked database; refused (and this script
+# exits non-zero, after the keys above are safely written) on one that holds history and no mark.
+if [ "$unit" = usage-monitor ]; then
+  if out=$("$FIRST_RUN_BIN" init 2>&1); then
+    echo "first-run: usage-monitor: database marked as starting with no history (init)"
+  else
+    printf '%s\n' "$out" >&2
+    echo "first-run: usage-monitor: init refused; the keys above are written. Use migrate-from for a database that has history." >&2
+    exit 1
+  fi
+fi
