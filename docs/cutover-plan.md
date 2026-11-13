@@ -132,7 +132,9 @@ variable first: the commands that do create resolve the live directory of the ap
    the new link, its drop-in (`30-*-exec.conf` for the gateway and usage; `20-fleet-exec.conf` for the two `station` targets), the restart
    and the `/healthz` poll, and skip the preflight while the migrated database does not exist. For each `station` target it must also say
    its new install root; the dry run does not print the `<name>.pre-fleet-install` copy (section 10), the first real deploy makes it.
-   Passed on 2026-11-12 against earlier artifacts of this branch (conversion-notes); repeat on the published ones.
+   Passed on 2026-11-12 against earlier artifacts and on 2026-11-13 against the deploy build of step 1 (section 10).
+   **The artifacts of run 43342055647 expire on 2026-12-13.** If the window is later, or `main` has moved, the new `push` run replaces the one in
+   step 1 and these dry runs are repeated from it; a deploy from an expired run fails at the download, before anything on the host changes.
 5. **The ledger answer and the principal list, on the rehearsal copy** (driver, scratch directory, never the live units): `gateway-store
    migrate-from` the day's copy of `gateway.db` into a scratch data directory, then `llm-gateway validate` with the ledger's
    credential file reachable. Expected: either `llm-gateway: OK, revision <n>, <r> route(s), 0 live key(s)` (the ledger opened in
