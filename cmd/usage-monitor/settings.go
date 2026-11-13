@@ -7,6 +7,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/hollis-labs/station/internal/cfgnum"
 	"github.com/hollis-labs/station/internal/usagemonitor"
 )
 
@@ -42,7 +43,7 @@ func parseSettings(raw any) (settings, error) {
 			rest[k] = v
 		}
 	}
-	b, err := yaml.Marshal(rest)
+	b, err := yaml.Marshal(cfgnum.Integers(rest))
 	if err != nil {
 		return out, fmt.Errorf("%s: %w", settingsKey, err)
 	}
